@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     fullText = await streamNovel({
       system:
-        'あなたは日本語のインタラクティブノベルゲームのシナリオライターです。指示に従い、指定フォーマットで必ず出力してください。===CHOICES===ブロックは省略せず必ず含めてください。',
+        system: getSystemPrompt(),
       user: prompt,
       maxTokens: 900,
       onChunk: () => {},
