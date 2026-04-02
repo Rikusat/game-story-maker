@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import SaveButton from "./SaveButton";
 import { MBTI_SCENES, calculateMbti } from "@/types";
