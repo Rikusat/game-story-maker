@@ -10,4 +10,10 @@ const nextConfig: NextConfig = {
   },
 };
 
+experimental: {
+  outputFileTracingIncludes: {
+    '/api/novel/generate': ['./prompts/**/*'],
+  },
+},
+
 export default nextConfig;
