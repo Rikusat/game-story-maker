@@ -8,12 +8,9 @@ const nextConfig: NextConfig = {
     config.cache = false;
     return config;
   },
-};
-
-experimental: {
   outputFileTracingIncludes: {
     '/api/novel/generate': ['./prompts/**/*'],
   },
-},
+};
 
 export default nextConfig;
