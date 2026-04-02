@@ -1,245 +1,320 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { useRoom } from "@/lib/hooks/useRoom";
-import { useVote } from "@/lib/hooks/useVote";
-import NovelViewer from "@/components/novel/NovelViewer";
-import ChoicePanel from "@/components/novel/ChoicePanel";
-import BookCloseEffect from "@/components/novel/BookCloseEffect";
-import PlayerList from "@/components/room/PlayerList";
-import ReactionStamp from "@/components/room/ReactionStamp";
 import { MBTI_SCENES } from "@/types";
+
+type Phase = "init" | "generating" | "reading" | "choosing" | "voting";
+
+interface Choices {
+  a: string;
+  b: string;
+}
 
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
   const supabase = createClient();
 
-  const [userId, setUserId] = useState("");
+  // ゲーム状態
+  const [phase, setPhase] = useState<Phase>("init");
   const [displayText, setDisplayText] = useState("");
-  const [streamBody, setStreamBody] = useState<string | null>(null);
-  const [showBookClose, setShowBookClose] = useState(false);
-  const streamingRef = useRef(false);
+  const [choices, setChoices] = useState<Choices | null>(null);
+  const [myVote, setMyVote] = useState<"A" | "B" | null>(null);
+  const [sceneNumber, setSceneNumber] = useState(0);
+  const [sceneLabel, setSceneLabel] = useState("");
+  const [error, setError] = useState("");
+  const [roomCode, setRoomCode] = useState("");
 
-  const { room, players, session, currentChoice, refetch } = useRoom(roomId);
-  const { myVote, countA, countB, votes, castVote } = useVote(
-    currentChoice?.id ?? null,
-    roomId,
-    userId
-  );
+  // refs（再レンダリングをまたぐ値）
+  const sessionIdRef = useRef("");
+  const sceneNumberRef = useRef(0);
+  const sceneChoiceIdRef = useRef("");
+  const userIdRef = useRef("");
+  const generatingRef = useRef(false);
+  const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const isHost = room?.host_id === userId;
-  const isGenerating = session?.status === "generating";
-  const isChoice = session?.status === "choice";
-  const isCompleted = session?.status === "completed";
-
-  // 現在のユーザーID取得
+  // ─────────────────────────────────────
+  // 初期化: ルーム・セッション取得
+  // ─────────────────────────────────────
   useEffect(() => {
-    const id = localStorage.getItem("userId") ?? "";
-    setUserId(id);
+    userIdRef.current = localStorage.getItem("userId") ?? "";
+    init();
   }, []);
 
-  // session のテキストを displayText へ反映
-  useEffect(() => {
-    if (session?.full_text) setDisplayText(session.full_text);
-  }, [session?.full_text]);
+  const init = async () => {
+    const { data: room } = await supabase
+      .from("rooms").select("*").eq("id", roomId).single();
+    if (!room) { setError("ルームが見つかりません"); return; }
+    setRoomCode(room.code);
 
-  // ホストが generating になったらストリームを開始
-  useEffect(() => {
-    if (!isHost || !session || session.status !== "generating" || streamingRef.current) return;
-    streamingRef.current = true;
+    const { data: session } = await supabase
+      .from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle();
 
-    const sceneNumber = session.current_scene;
-    const isLastScene = sceneNumber >= 3;
+    if (!session) {
+      // waiting（まだ開始していない）
+      setPhase("choosing"); // ← 開始ボタン表示のため
+      return;
+    }
 
-    // 直前シーンの勝利選択肢テキストを取得してコンテキストに
-    (async () => {
+    sessionIdRef.current = session.id;
+    sceneNumberRef.current = session.current_scene;
+    setSceneNumber(session.current_scene);
+
+    if (session.status === "completed") {
+      router.push(`/result/${roomId}`);
+      return;
+    }
+
+    if (session.status === "choice") {
+      // 既存の選択肢を復元
+      const { data: sc } = await supabase
+        .from("scene_choices").select("*")
+        .eq("novel_session_id", session.id)
+        .eq("scene_number", session.current_scene - 1)
+        .maybeSingle();
+      if (sc) {
+        sceneChoiceIdRef.current = sc.id;
+        setChoices({ a: sc.choice_a, b: sc.choice_b });
+        setDisplayText(session.full_text ?? "");
+        setSceneLabel(MBTI_SCENES[sc.scene_number]?.label ?? "");
+        setPhase("choosing");
+        return;
+      }
+    }
+
+    // status === "generating" → 生成開始
+    startGenerating();
+  };
+
+  // ─────────────────────────────────────
+  // 生成開始
+  // ─────────────────────────────────────
+  const startGenerating = useCallback(async () => {
+    if (generatingRef.current) return;
+    generatingRef.current = true;
+    setPhase("generating");
+    setError("");
+    setMyVote(null);
+    setChoices(null);
+
+    try {
+      const scene = sceneNumberRef.current;
+      const sid = sessionIdRef.current;
+
+      // 直前シーンの勝利選択肢を取得
       let previousChoiceText = "";
-      if (sceneNumber > 0) {
-        const { data: prevChoice } = await supabase
-          .from("scene_choices")
-          .select("*")
-          .eq("novel_session_id", session.id)
-          .eq("scene_number", sceneNumber - 1)
+      if (scene > 0) {
+        const { data: prev } = await supabase
+          .from("scene_choices").select("*")
+          .eq("novel_session_id", sid)
+          .eq("scene_number", scene - 1)
           .maybeSingle();
-        if (prevChoice?.winning_choice) {
-          previousChoiceText =
-            prevChoice.winning_choice === "A"
-              ? prevChoice.choice_a
-              : prevChoice.choice_b;
+        if (prev?.winning_choice) {
+          previousChoiceText = prev.winning_choice === "A" ? prev.choice_a : prev.choice_b;
         }
       }
 
-      setStreamBody(
-        JSON.stringify({ sessionId: session.id, sceneNumber, previousChoiceText })
-      );
-    })();
-  }, [session?.status, session?.current_scene, isHost]);
+      const res = await fetch("/api/novel/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sid, sceneNumber: scene, previousChoiceText }),
+      });
 
-  // ストリーム完了ハンドラ
-  const handleStreamDone = (data: {
-    sceneChoiceId?: string;
-    deadline?: string;
-    completed?: boolean;
-  }) => {
-    streamingRef.current = false;
-    setStreamBody(null);
-    if (data.completed) {
-      setShowBookClose(true);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "生成に失敗しました");
+      }
+
+      const data = await res.json();
+      generatingRef.current = false;
+
+      setSceneLabel(MBTI_SCENES[scene]?.label ?? "");
+
+      if (data.completed) {
+        animateText(data.text, () => {
+          setTimeout(() => router.push(`/result/${roomId}`), 1500);
+        });
+      } else {
+        sceneChoiceIdRef.current = data.sceneChoiceId ?? "";
+        setChoices({ a: data.choices.a, b: data.choices.b });
+        animateText(data.text, () => setPhase("choosing"));
+      }
+    } catch (err: any) {
+      generatingRef.current = false;
+      setError(err.message ?? "エラーが発生しました");
+      setPhase("choosing");
     }
-    refetch();
+  }, []);
+
+  // ─────────────────────────────────────
+  // タイプライター演出
+  // ─────────────────────────────────────
+  const animateText = (text: string, onDone?: () => void) => {
+    if (animIntervalRef.current) clearInterval(animIntervalRef.current);
+    setDisplayText("");
+    setPhase("reading");
+    let i = 0;
+    animIntervalRef.current = setInterval(() => {
+      if (i >= text.length) {
+        clearInterval(animIntervalRef.current!);
+        animIntervalRef.current = null;
+        onDone?.();
+        return;
+      }
+      setDisplayText((d) => d + text[i]);
+      i++;
+    }, 25);
   };
 
-  // ストリームチャンク受信（表示 + DBは API 側が 1 秒バッチで更新）
-  const handleStreamChunk = (chunk: string) => {
-    setDisplayText((t) => t + chunk);
+  // ─────────────────────────────────────
+  // 選択肢を選ぶ
+  // ─────────────────────────────────────
+  const handleVote = async (choice: "A" | "B") => {
+    if (myVote || phase !== "choosing") return;
+    setMyVote(choice);
+    setPhase("voting");
+
+    try {
+      const res = await fetch("/api/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneChoiceId: sceneChoiceIdRef.current,
+          choice,
+          roomId,
+          userId: userIdRef.current,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.completed) {
+        router.push(`/result/${roomId}`);
+        return;
+      }
+
+      // 次シーンへ
+      sceneNumberRef.current = data.nextScene;
+      setSceneNumber(data.nextScene);
+      setDisplayText("");
+      startGenerating();
+    } catch (err: any) {
+      setError(err.message ?? "投票に失敗しました");
+      setMyVote(null);
+      setPhase("choosing");
+    }
   };
 
-  // ゲーム開始（ホストのみ）
-  const handleStart = async () => {
-    const res = await fetch("/api/match", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", roomId, userId }),
-    });
-    await res.json();
-    refetch();
-  };
-
-  // タイマー切れ集計（ホストのみ）
-  const handleTimeUp = async () => {
-    if (!currentChoice) return;
-    await fetch("/api/vote", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sceneChoiceId: currentChoice.id, roomId }),
-    });
-    refetch();
-  };
-
-  if (!room) {
-    return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <span className="text-gray-400">読み込み中…</span>
-      </div>
-    );
-  }
+  // ─────────────────────────────────────
+  // レンダリング
+  // ─────────────────────────────────────
+  const progressBar = (
+    <div className="flex gap-1 mb-4">
+      {MBTI_SCENES.map((s, i) => (
+        <div
+          key={s.dimension}
+          className={`flex-1 h-1.5 rounded-full transition-colors ${
+            i < sceneNumber
+              ? "bg-indigo-400"
+              : i === sceneNumber && phase !== "init"
+              ? "bg-indigo-600 animate-pulse"
+              : "bg-gray-700"
+          }`}
+        />
+      ))}
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col md:flex-row">
-      {showBookClose && (
-        <BookCloseEffect
-          mbtiResult={session?.mbti_result}
-          onDone={() => router.push(`/result/${roomId}`)}
-        />
-      )}
-
-      {/* サイドバー */}
-      <aside className="md:w-64 bg-gray-900 border-b md:border-b-0 md:border-r border-gray-800 p-4 flex flex-col gap-4">
-        {/* ルームコード */}
-        <div className="text-center">
-          <p className="text-gray-400 text-xs">ルームコード</p>
-          <p className="text-2xl font-bold text-indigo-300 tracking-widest">{room.code}</p>
-        </div>
-
-        {/* シーン進捗 */}
-        {session && (
-          <div>
-            <p className="text-gray-400 text-xs mb-1">進捗</p>
-            <div className="flex gap-1">
-              {MBTI_SCENES.map((s, i) => (
-                <div
-                  key={s.dimension}
-                  className={`flex-1 h-1.5 rounded-full ${
-                    i < session.current_scene
-                      ? "bg-indigo-400"
-                      : i === session.current_scene && session.status !== "completed"
-                      ? "bg-indigo-600 animate-pulse"
-                      : "bg-gray-700"
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* プレイヤー一覧 */}
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+      {/* ヘッダー */}
+      <header className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
         <div>
-          <p className="text-gray-400 text-xs mb-2">プレイヤー</p>
-          <PlayerList
-            players={players}
-            hostId={room.host_id}
-            currentUserId={userId}
-            votes={votes}
-          />
+          <p className="text-xs text-gray-500">ルームコード</p>
+          <p className="text-lg font-bold text-indigo-300 tracking-widest">{roomCode}</p>
         </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-500">シーン</p>
+          <p className="text-lg font-bold text-gray-200">{sceneNumber + 1} / 4</p>
+        </div>
+      </header>
 
-        {/* ゲーム開始ボタン（待機中のホストのみ） */}
-        {room.status === "waiting" && isHost && (
-          <button
-            onClick={handleStart}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl mt-auto transition-colors"
-          >
-            ゲーム開始
-          </button>
-        )}
+      {/* 進捗バー */}
+      <div className="px-6 pt-3">{progressBar}</div>
 
-        {room.status === "waiting" && !isHost && (
-          <p className="text-gray-500 text-sm text-center mt-auto">
-            ホストの開始を待っています…
-          </p>
-        )}
-
-        {/* スタンプ */}
-        {room.status === "playing" && (
-          <div>
-            <p className="text-gray-400 text-xs mb-2">リアクション</p>
-            <ReactionStamp roomId={roomId} />
+      {/* メインコンテンツ */}
+      <main className="flex-1 flex flex-col px-6 py-4 max-w-2xl mx-auto w-full">
+        {/* エラー */}
+        {error && (
+          <div className="mb-4 bg-red-900/40 border border-red-700 rounded-xl p-4 text-red-300 text-sm">
+            <p>{error}</p>
+            <button
+              onClick={() => { setError(""); startGenerating(); }}
+              className="mt-2 text-red-400 underline text-xs"
+            >
+              再試行
+            </button>
           </div>
         )}
-      </aside>
 
-      {/* メインエリア */}
-      <main className="flex-1 flex flex-col min-h-0">
-        {room.status === "waiting" ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
-            <p className="text-6xl mb-4">📖</p>
-            <p className="text-gray-300 text-xl mb-2">冒険が始まるのを待っています</p>
-            <p className="text-gray-500">
-              コード <span className="text-indigo-300 font-bold">{room.code}</span> を友達に教えよう
+        {/* 生成中 */}
+        {phase === "generating" && !error && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+            <span className="animate-spin text-4xl text-indigo-400">✦</span>
+            <p className="text-gray-400 text-lg">物語を紡いでいます…</p>
+            {sceneLabel && (
+              <p className="text-gray-600 text-sm">「{sceneLabel}」を問う場面</p>
+            )}
+          </div>
+        )}
+
+        {/* テキスト表示 */}
+        {(phase === "reading" || phase === "choosing" || phase === "voting") && displayText && (
+          <div className="flex-1 overflow-y-auto mb-6">
+            <p className="text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-serif">
+              {displayText}
+              {phase === "reading" && (
+                <span className="inline-block w-0.5 h-5 bg-indigo-400 ml-0.5 animate-pulse" />
+              )}
             </p>
           </div>
-        ) : (
-          <>
-            {/* ストーリー表示 */}
-            <div className="flex-1 overflow-hidden">
-              <NovelViewer
-                text={displayText}
-                isGenerating={isGenerating}
-                streamUrl={isHost && streamBody ? streamBody : null}
-                onStreamChunk={handleStreamChunk}
-                onStreamDone={handleStreamDone}
-              />
-            </div>
+        )}
 
-            {/* 選択肢パネル */}
-            {isChoice && currentChoice && (
-              <div className="p-4 md:p-6">
-                <ChoicePanel
-                  choice={currentChoice}
-                  myVote={myVote}
-                  countA={countA}
-                  countB={countB}
-                  totalPlayers={players.length}
-                  onVote={castVote}
-                  onTimeUp={handleTimeUp}
-                  isHost={isHost}
-                />
-              </div>
+        {/* 選択肢 */}
+        {phase === "choosing" && choices && (
+          <div className="mt-auto">
+            {sceneLabel && (
+              <p className="text-center text-indigo-400 text-sm font-medium mb-3">
+                {sceneLabel}
+              </p>
             )}
-          </>
+            <div className="grid grid-cols-2 gap-3">
+              {(["A", "B"] as const).map((v) => {
+                const label = v === "A" ? choices.a : choices.b;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => handleVote(v)}
+                    className="bg-gray-800 hover:bg-indigo-900/60 border border-gray-700 hover:border-indigo-500 rounded-xl p-4 text-left transition-all cursor-pointer"
+                  >
+                    <span className="text-xs text-indigo-400 font-bold block mb-1">
+                      選択 {v}
+                    </span>
+                    <span className="text-gray-100 text-sm leading-snug">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 投票中（集計待ち） */}
+        {phase === "voting" && (
+          <div className="mt-auto flex items-center justify-center gap-3 py-6 text-gray-400">
+            <span className="animate-spin text-xl text-indigo-400">✦</span>
+            <span>次のシーンを準備中…</span>
+          </div>
         )}
       </main>
     </div>

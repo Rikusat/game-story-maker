@@ -16,15 +16,10 @@ export async function POST(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const { data: votes } = await supabase
-    .from("votes")
-    .select("*")
-    .eq("scene_choice_id", sceneChoiceId);
+    .from("votes").select("*").eq("scene_choice_id", sceneChoiceId);
 
   const { data: players } = await supabase
-    .from("room_players")
-    .select("*")
-    .eq("room_id", roomId)
-    .eq("is_active", true);
+    .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
 
   const allVoted = (votes?.length ?? 0) >= (players?.length ?? 1);
 
@@ -32,10 +27,19 @@ export async function POST(request: NextRequest) {
     await tallyAndAdvance(supabase, sceneChoiceId, roomId);
   }
 
-  return NextResponse.json({ ok: true, allVoted });
+  // 集計後のセッション状態を返す
+  const { data: session } = await supabase
+    .from("novel_sessions").select("current_scene, status, mbti_result")
+    .eq("room_id", roomId).single();
+
+  return NextResponse.json({
+    ok: true,
+    nextScene: session?.current_scene ?? 0,
+    completed: session?.status === "completed",
+    mbtiResult: session?.mbti_result ?? null,
+  });
 }
 
-// タイマー切れ時の集計（ホストが呼ぶ）
 export async function PUT(request: NextRequest) {
   const supabase = createAdminClient();
   const { sceneChoiceId, roomId } = await request.json();
