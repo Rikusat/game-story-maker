@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { MBTI_SCENES } from "@/types";
 
+const SCENE_CHAPTER_LABELS = ["起", "承", "転", "結"];
+
 type Phase = "init" | "generating" | "reading" | "choosing" | "voting";
 
 interface Choices {
@@ -34,6 +36,8 @@ export default function RoomPage() {
   const userIdRef = useRef("");
   const generatingRef = useRef(false);
   const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const animFullTextRef = useRef("");
+  const animOnDoneRef = useRef<(() => void) | undefined>(undefined);
 
   // ─────────────────────────────────────
   // 初期化: ルーム・セッション取得
@@ -78,7 +82,7 @@ export default function RoomPage() {
         sceneChoiceIdRef.current = sc.id;
         setChoices({ a: sc.choice_a, b: sc.choice_b });
         setDisplayText(session.full_text ?? "");
-        setSceneLabel(MBTI_SCENES[sc.scene_number]?.label ?? "");
+        setSceneLabel(SCENE_CHAPTER_LABELS[sc.scene_number] ?? "");
         setPhase("choosing");
         return;
       }
@@ -130,7 +134,7 @@ export default function RoomPage() {
       const data = await res.json();
       generatingRef.current = false;
 
-      setSceneLabel(MBTI_SCENES[scene]?.label ?? "");
+      setSceneLabel(SCENE_CHAPTER_LABELS[scene] ?? "");
 
       if (data.completed) {
         animateText(data.text, () => {
@@ -153,9 +157,11 @@ export default function RoomPage() {
   // ─────────────────────────────────────
   const animateText = (text: string, onDone?: () => void) => {
     if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-    setDisplayText("");
+    animFullTextRef.current = text;
+    animOnDoneRef.current = onDone;
     setPhase("reading");
-    let i = 0;
+    setDisplayText(text[0] ?? ""); // 1文字目を即時表示
+    let i = 1;
     animIntervalRef.current = setInterval(() => {
       if (i >= text.length) {
         clearInterval(animIntervalRef.current!);
@@ -165,7 +171,15 @@ export default function RoomPage() {
       }
       setDisplayText((d) => d + text[i]);
       i++;
-    }, 25);
+    }, 18);
+  };
+
+  const skipAnimation = () => {
+    if (phase !== "reading" || !animIntervalRef.current) return;
+    clearInterval(animIntervalRef.current);
+    animIntervalRef.current = null;
+    setDisplayText(animFullTextRef.current);
+    animOnDoneRef.current?.();
   };
 
   // ─────────────────────────────────────
@@ -264,20 +278,26 @@ export default function RoomPage() {
             <span className="animate-spin text-4xl text-indigo-400">✦</span>
             <p className="text-gray-400 text-lg">物語を紡いでいます…</p>
             {sceneLabel && (
-              <p className="text-gray-600 text-sm">「{sceneLabel}」を問う場面</p>
+              <p className="text-gray-600 text-sm">第{sceneNumber + 1}章「{sceneLabel}」</p>
             )}
           </div>
         )}
 
         {/* テキスト表示 */}
         {(phase === "reading" || phase === "choosing" || phase === "voting") && displayText && (
-          <div className="flex-1 overflow-y-auto mb-6">
+          <div
+            className="flex-1 overflow-y-auto mb-6 cursor-pointer select-none"
+            onClick={skipAnimation}
+          >
             <p className="text-gray-100 text-lg leading-relaxed whitespace-pre-wrap font-serif">
               {displayText}
               {phase === "reading" && (
                 <span className="inline-block w-0.5 h-5 bg-indigo-400 ml-0.5 animate-pulse" />
               )}
             </p>
+            {phase === "reading" && (
+              <p className="text-gray-600 text-xs text-right mt-2">タップで全文表示</p>
+            )}
           </div>
         )}
 
@@ -286,7 +306,7 @@ export default function RoomPage() {
           <div className="mt-auto">
             {sceneLabel && (
               <p className="text-center text-indigo-400 text-sm font-medium mb-3">
-                {sceneLabel}
+                第{sceneNumber + 1}章「{sceneLabel}」— あなたはどうする？
               </p>
             )}
             <div className="grid grid-cols-2 gap-3">

@@ -30,9 +30,9 @@ export async function POST(request: NextRequest) {
   try {
     fullText = await streamNovel({
       system:
-        'あなたは日本語のインタラクティブノベルゲームのシナリオライターです。指示に従い、指定フォーマットで出力してください。',
+        'あなたは日本語のインタラクティブノベルゲームのシナリオライターです。指示に従い、指定フォーマットで必ず出力してください。===CHOICES===ブロックは省略せず必ず含めてください。',
       user: prompt,
-      maxTokens: 700,
+      maxTokens: 900,
       onChunk: () => {},
     })
   } catch (err: any) {

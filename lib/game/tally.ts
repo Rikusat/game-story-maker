@@ -1,13 +1,23 @@
 import { calculateMbti, type MbtiDimension, type VoteChoice } from "@/types";
 
 export async function tallyAndAdvance(supabase: any, sceneChoiceId: string, roomId: string) {
+  // scene_choiceを取得（joinなし）
   const { data: sceneChoice } = await supabase
     .from("scene_choices")
-    .select("*, novel_sessions(*)")
+    .select("*")
     .eq("id", sceneChoiceId)
     .single();
 
   if (!sceneChoice || sceneChoice.winning_choice) return;
+
+  // sessionを別途取得（joinのarray/object問題を回避）
+  const { data: session } = await supabase
+    .from("novel_sessions")
+    .select("*")
+    .eq("id", sceneChoice.novel_session_id)
+    .single();
+
+  if (!session) return;
 
   const { data: votes } = await supabase
     .from("votes")
@@ -23,7 +33,6 @@ export async function tallyAndAdvance(supabase: any, sceneChoiceId: string, room
     .update({ winning_choice: winner })
     .eq("id", sceneChoiceId);
 
-  const session = sceneChoice.novel_sessions;
   const nextScene = session.current_scene + 1;
   const isLastScene = nextScene >= 4;
 
