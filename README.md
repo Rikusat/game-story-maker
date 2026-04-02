@@ -1,1 +1,1 @@
-# game-story-maker1
+# 一期一会ノベル（仮）
