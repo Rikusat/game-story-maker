@@ -75,6 +75,7 @@ export default function NovelViewer({
               const data = JSON.parse(line.slice(6));
               if (data.type === "chunk" && onStreamChunk) onStreamChunk(data.content);
               if (data.type === "done" && onStreamDone) onStreamDone(data);
+              if (data.type === "error" && onStreamDone) onStreamDone({});
             } catch {}
           }
         }

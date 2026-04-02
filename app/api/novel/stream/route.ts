@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { openai } from "@/lib/claude";
 import { buildStoryPrompt } from "@/lib/claude/prompts";
+import { tallyAndAdvance } from "@/lib/game/tally";
 import { MBTI_SCENES } from "@/types";
 
 export async function POST(request: NextRequest) {
@@ -148,6 +149,34 @@ export async function POST(request: NextRequest) {
             .from("novel_sessions")
             .update({ full_text: newFullText, status: "choice" })
             .eq("id", sessionId);
+
+          // ボットが存在する場合は自動投票
+          if (sceneChoice) {
+            const { data: allPlayers } = await supabase
+              .from("room_players")
+              .select("*, profiles(*)")
+              .eq("room_id", session.room_id)
+              .eq("is_active", true);
+
+            const bots = (allPlayers ?? []).filter(
+              (p: any) => p.profiles?.username?.startsWith("🤖")
+            );
+
+            for (const bot of bots) {
+              await supabase.from("votes").insert({
+                scene_choice_id: sceneChoice.id,
+                room_id: session.room_id,
+                user_id: bot.user_id,
+                choice: Math.random() < 0.5 ? "A" : "B",
+              });
+            }
+
+            // ボット込みで全員投票済みなら即集計
+            const humanCount = (allPlayers ?? []).length - bots.length;
+            if (humanCount === 0) {
+              await tallyAndAdvance(supabase, sceneChoice.id, session.room_id);
+            }
+          }
 
           send({
             type: "done",

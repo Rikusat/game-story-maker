@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
 
   // ── ルーム作成 ──────────────────────────────
   if (action === "create") {
+    const { withBots } = body;
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { data: room, error } = await supabase
       .from("rooms")
@@ -28,6 +29,23 @@ export async function POST(request: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     await supabase.from("room_players").insert({ room_id: room.id, user_id: userId });
+
+    if (withBots) {
+      // ボット2体を追加して即スタート
+      for (let i = 1; i <= 2; i++) {
+        const botId = crypto.randomUUID();
+        await supabase.from("profiles").upsert(
+          { id: botId, username: `🤖ボット${i}` },
+          { onConflict: "id" }
+        );
+        await supabase.from("room_players").insert({ room_id: room.id, user_id: botId });
+      }
+      await supabase.from("rooms").update({ status: "playing" }).eq("id", room.id);
+      await supabase
+        .from("novel_sessions")
+        .insert({ room_id: room.id, status: "generating", current_scene: 0 });
+    }
+
     return NextResponse.json({ room });
   }
 

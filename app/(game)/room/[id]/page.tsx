@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase";
 import { useRoom } from "@/lib/hooks/useRoom";
 import { useVote } from "@/lib/hooks/useVote";
 import NovelViewer from "@/components/novel/NovelViewer";
@@ -14,6 +15,7 @@ import { MBTI_SCENES } from "@/types";
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
+  const supabase = createClient();
 
   const [userId, setUserId] = useState("");
   const [displayText, setDisplayText] = useState("");

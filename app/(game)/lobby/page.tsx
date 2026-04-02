@@ -15,18 +15,18 @@ function getOrCreateUserId(): string {
 export default function LobbyPage() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState("");
-  const [loading, setLoading] = useState<"create" | "join" | null>(null);
+  const [loading, setLoading] = useState<"create" | "solo" | "join" | null>(null);
   const [error, setError] = useState("");
 
-  const handleCreate = async () => {
-    setLoading("create");
+  const handleCreate = async (withBots = false) => {
+    setLoading(withBots ? "solo" : "create");
     setError("");
     try {
       const userId = getOrCreateUserId();
       const res = await fetch("/api/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create", userId }),
+        body: JSON.stringify({ action: "create", userId, withBots }),
       });
       const { room, error: err } = await res.json();
       if (err) throw new Error(err);
@@ -69,11 +69,19 @@ export default function LobbyPage() {
 
       <div className="w-full max-w-sm flex flex-col gap-4">
         <button
-          onClick={handleCreate}
+          onClick={() => handleCreate(false)}
           disabled={!!loading}
           className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl text-lg transition-colors disabled:opacity-50"
         >
-          {loading === "create" ? "作成中…" : "✦ ルームを作る"}
+          {loading === "create" ? "作成中…" : "✦ ルームを作る（フレンドと）"}
+        </button>
+
+        <button
+          onClick={() => handleCreate(true)}
+          disabled={!!loading}
+          className="bg-purple-700 hover:bg-purple-600 text-white font-bold py-4 rounded-xl text-lg transition-colors disabled:opacity-50"
+        >
+          {loading === "solo" ? "準備中…" : "🤖 ボットと1人で遊ぶ"}
         </button>
 
         <div className="flex items-center gap-3">
