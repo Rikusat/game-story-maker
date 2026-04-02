@@ -35,8 +35,15 @@ export async function POST(request: NextRequest) {
       maxTokens: 700,
       onChunk: () => {},
     })
-  } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+  } catch (err: any) {
+    const msg = String(err)
+    if (msg.includes('429')) {
+      return NextResponse.json(
+        { error: 'OpenAI APIのクレジットが不足しています。https://platform.openai.com/billing でチャージしてください。' },
+        { status: 500 }
+      )
+    }
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 
   // ストーリー本文と選択肢を分離

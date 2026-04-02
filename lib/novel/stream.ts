@@ -13,7 +13,7 @@ export async function streamNovel({
 }: StreamNovelParams): Promise<string> {
   const { default: OpenAI } = await import('openai')
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  const model = process.env.OPENAI_MODEL ?? 'gpt-4o'
+  const model = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 
   let fullText = ''
 
