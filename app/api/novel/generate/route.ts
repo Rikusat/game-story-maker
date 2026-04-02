@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { streamNovel } from '@/lib/novel/stream'
-import { buildStoryPrompt } from '@/lib/claude/prompts'
+import { buildStoryPrompt, getSystemPrompt } from '@/lib/claude/prompts'
 import { MBTI_SCENES } from '@/types'
 
 export const maxDuration = 60
