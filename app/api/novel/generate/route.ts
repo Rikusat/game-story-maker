@@ -29,8 +29,7 @@ export async function POST(request: NextRequest) {
   let fullText = ''
   try {
     fullText = await streamNovel({
-      system:
-        system: getSystemPrompt(),
+      system: getSystemPrompt(),
       user: prompt,
       maxTokens: 900,
       onChunk: () => {},
