@@ -1,13 +1,11 @@
 import { NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { openai } from "@/lib/claude";
 import { buildStoryPrompt } from "@/lib/claude/prompts";
 import { MBTI_SCENES } from "@/types";
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const supabase = createAdminClient();
 
   const { sessionId, sceneNumber, previousChoiceText } = await request.json();
 

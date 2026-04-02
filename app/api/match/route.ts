@@ -1,26 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
+
+async function ensureProfile(supabase: ReturnType<typeof createAdminClient>, userId: string) {
+  await supabase.from("profiles").upsert(
+    { id: userId, username: "プレイヤー_" + userId.slice(0, 8) },
+    { onConflict: "id" }
+  );
+}
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+  const supabase = createAdminClient();
   const body = await request.json();
-  const { action } = body;
+  const { action, userId } = body;
+
+  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
+  await ensureProfile(supabase, userId);
 
   // ── ルーム作成 ──────────────────────────────
   if (action === "create") {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
     const { data: room, error } = await supabase
       .from("rooms")
-      .insert({ code, host_id: user.id })
+      .insert({ code, host_id: userId })
       .select()
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    await supabase.from("room_players").insert({ room_id: room.id, user_id: user.id });
+    await supabase.from("room_players").insert({ room_id: room.id, user_id: userId });
     return NextResponse.json({ room });
   }
 
@@ -47,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     await supabase
       .from("room_players")
-      .upsert({ room_id: room.id, user_id: user.id, is_active: true });
+      .upsert({ room_id: room.id, user_id: userId, is_active: true }, { onConflict: "room_id,user_id" });
 
     return NextResponse.json({ room });
   }
@@ -62,7 +69,7 @@ export async function POST(request: NextRequest) {
       .eq("id", roomId)
       .single();
 
-    if (!room || room.host_id !== user.id)
+    if (!room || room.host_id !== userId)
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
 
     await supabase.from("rooms").update({ status: "playing" }).eq("id", roomId);

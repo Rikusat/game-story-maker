@@ -54,7 +54,7 @@ export function useVote(sceneChoiceId: string | null, roomId: string, userId: st
         await fetch("/api/vote", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sceneChoiceId, choice, roomId }),
+          body: JSON.stringify({ sceneChoiceId, choice, roomId, userId }),
         });
         setMyVote(choice);
         await fetchVotes();

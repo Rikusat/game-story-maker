@@ -2,10 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase";
+
+function getOrCreateUserId(): string {
+  let id = localStorage.getItem("userId");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("userId", id);
+  }
+  return id;
+}
 
 export default function LobbyPage() {
-  const supabase = createClient();
   const router = useRouter();
   const [joinCode, setJoinCode] = useState("");
   const [loading, setLoading] = useState<"create" | "join" | null>(null);
@@ -15,10 +22,11 @@ export default function LobbyPage() {
     setLoading("create");
     setError("");
     try {
+      const userId = getOrCreateUserId();
       const res = await fetch("/api/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create" }),
+        body: JSON.stringify({ action: "create", userId }),
       });
       const { room, error: err } = await res.json();
       if (err) throw new Error(err);
@@ -35,10 +43,11 @@ export default function LobbyPage() {
     setLoading("join");
     setError("");
     try {
+      const userId = getOrCreateUserId();
       const res = await fetch("/api/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "join", code: joinCode }),
+        body: JSON.stringify({ action: "join", code: joinCode, userId }),
       });
       const { room, error: err } = await res.json();
       if (err) throw new Error(err);
@@ -50,20 +59,8 @@ export default function LobbyPage() {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
-
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center px-4">
-      <button
-        onClick={handleLogout}
-        className="absolute top-4 right-4 text-gray-500 hover:text-gray-300 text-sm"
-      >
-        ログアウト
-      </button>
-
       <h1 className="text-4xl font-bold text-indigo-300 mb-2">📖</h1>
       <h2 className="text-3xl font-bold text-gray-100 mb-2">Game Story Maker</h2>
       <p className="text-gray-400 mb-10 text-center">
@@ -71,7 +68,6 @@ export default function LobbyPage() {
       </p>
 
       <div className="w-full max-w-sm flex flex-col gap-4">
-        {/* ルーム作成 */}
         <button
           onClick={handleCreate}
           disabled={!!loading}
@@ -86,7 +82,6 @@ export default function LobbyPage() {
           <div className="flex-1 h-px bg-gray-700" />
         </div>
 
-        {/* ルーム参加 */}
         <form onSubmit={handleJoin} className="flex gap-2">
           <input
             type="text"
@@ -108,7 +103,6 @@ export default function LobbyPage() {
 
         {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
-        {/* 本棚へ */}
         <button
           onClick={() => router.push("/bookshelf")}
           className="text-gray-400 hover:text-gray-200 text-sm text-center mt-2"

@@ -16,10 +16,11 @@ export default function SaveButton({ sessionId, existingTitle }: Props) {
   const handleSave = async () => {
     setLoading(true);
     try {
+      const userId = localStorage.getItem("userId") ?? "";
       const res = await fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, customTitle: title || undefined }),
+        body: JSON.stringify({ sessionId, customTitle: title || undefined, userId }),
       });
       const data = await res.json();
       setTitle(data.title);

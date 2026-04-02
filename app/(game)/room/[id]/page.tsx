@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase";
 import { useRoom } from "@/lib/hooks/useRoom";
 import { useVote } from "@/lib/hooks/useVote";
 import NovelViewer from "@/components/novel/NovelViewer";
@@ -15,7 +14,6 @@ import { MBTI_SCENES } from "@/types";
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
-  const supabase = createClient();
 
   const [userId, setUserId] = useState("");
   const [displayText, setDisplayText] = useState("");
@@ -37,9 +35,8 @@ export default function RoomPage() {
 
   // 現在のユーザーID取得
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUserId(user.id);
-    });
+    const id = localStorage.getItem("userId") ?? "";
+    setUserId(id);
   }, []);
 
   // session のテキストを displayText へ反映
@@ -103,7 +100,7 @@ export default function RoomPage() {
     const res = await fetch("/api/match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", roomId }),
+      body: JSON.stringify({ action: "start", roomId, userId }),
     });
     await res.json();
     refetch();

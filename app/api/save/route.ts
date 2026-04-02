@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { openai } from "@/lib/claude";
 import { buildTitlePrompt } from "@/lib/claude/prompts";
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = createAdminClient();
+  const { sessionId, customTitle, userId } = await request.json();
 
-  const { sessionId, customTitle } = await request.json();
+  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
   const { data: session } = await supabase
     .from("novel_sessions")
@@ -37,16 +36,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // タイトルを novel_sessions に保存
   await supabase
     .from("novel_sessions")
     .update({ title })
     .eq("id", sessionId);
 
-  // 本棚に保存（重複は upsert）
   const { data: saved, error } = await supabase
     .from("saved_novels")
-    .upsert({ novel_session_id: sessionId, user_id: user.id, title })
+    .upsert(
+      { novel_session_id: sessionId, user_id: userId, title },
+      { onConflict: "novel_session_id,user_id" }
+    )
     .select()
     .single();
 

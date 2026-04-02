@@ -1,23 +1,19 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
 export default async function BookshelfPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const supabase = createAdminClient();
 
   const { data: saved } = await supabase
     .from("saved_novels")
     .select("*, novel_sessions(*)")
-    .eq("user_id", user.id)
     .order("saved_at", { ascending: false });
 
   return (
     <div className="min-h-screen bg-gray-950 px-4 py-10">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold text-gray-100">📚 あなたの本棚</h1>
+          <h1 className="text-2xl font-bold text-gray-100">📚 保存した物語</h1>
           <Link
             href="/lobby"
             className="text-gray-400 hover:text-gray-200 text-sm"

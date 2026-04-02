@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import SaveButton from "./SaveButton";
 import { MBTI_SCENES, calculateMbti } from "@/types";
@@ -30,9 +29,6 @@ export default async function ResultPage({
   params: { id: string };
 }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
   const roomId = params.id;
 
   // セッション取得
