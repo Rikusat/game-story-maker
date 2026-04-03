@@ -69,6 +69,10 @@ export default function NovelViewer({ text, isGenerating }: Props) {
           margin: 0 auto;
           padding: 3rem 1.75rem 5rem;
         }
+        @keyframes nvFadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
         .nv-para {
           font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', serif;
           font-size: clamp(0.95rem, 2.4vw, 1.05rem);
@@ -79,22 +83,16 @@ export default function NovelViewer({ text, isGenerating }: Props) {
           margin: 0 0 2em;
           text-align: justify;
           word-break: break-all;
+          animation: nvFadeIn 0.6s ease both;
         }
+        .nv-para:nth-child(1) { animation-delay: 0s; }
+        .nv-para:nth-child(2) { animation-delay: 0.1s; }
+        .nv-para:nth-child(3) { animation-delay: 0.2s; }
+        .nv-para:nth-child(4) { animation-delay: 0.3s; }
+        .nv-para:nth-child(5) { animation-delay: 0.4s; }
+        .nv-para:nth-child(n+6) { animation-delay: 0.5s; }
 
-        /* カーソル（生成中のみ） */
-        @keyframes nvCursorBlink {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0; }
-        }
-        .nv-cursor {
-          display: inline-block;
-          width: 2px;
-          height: 1em;
-          background: #8b6914;
-          margin-left: 2px;
-          vertical-align: text-bottom;
-          animation: nvCursorBlink 1s step-end infinite;
-        }
+
 
         /* 和紙テクスチャ（薄いドット） */
         .nv-texture {
@@ -120,10 +118,7 @@ export default function NovelViewer({ text, isGenerating }: Props) {
             return (
               <p key={i} className="nv-para">
                 {para}
-                {/* カーソルは最後の段落・生成中のみ表示 */}
-                {isLast && isGenerating && (
-                  <span className="nv-cursor" aria-hidden />
-                )}
+
               </p>
             );
           })}
