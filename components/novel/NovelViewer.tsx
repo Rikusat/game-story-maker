@@ -22,13 +22,12 @@ export default function NovelViewer({
   onStreamDone,
 }: Props) {
   const [displayed, setDisplayed] = useState("");
-  const [cursor, setCursor]       = useState(true);
   const prevTextRef               = useRef("");
   const bottomRef                 = useRef<HTMLDivElement>(null);
 
-  // ── タイプライター演出（既存ロジック維持） ──
+  // ── タイプライター演出 ──
   useEffect(() => {
-    if (text === prevTextRef.current) return;
+    if (!text || text === prevTextRef.current) return;
     const newChars = text.slice(prevTextRef.current.length);
     prevTextRef.current = text;
     let i = 0;
@@ -40,13 +39,7 @@ export default function NovelViewer({
     return () => clearInterval(interval);
   }, [text]);
 
-  // ── カーソル点滅 ──
-  useEffect(() => {
-    const t = setInterval(() => setCursor((c) => !c), 530);
-    return () => clearInterval(t);
-  }, []);
-
-  // ── SSE ストリーム（ホスト用・既存ロジック維持） ──
+  // ── SSE ストリーム（ホスト用） ──
   useEffect(() => {
     if (!streamUrl) return;
     const ctrl = new AbortController();
@@ -86,7 +79,6 @@ export default function NovelViewer({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [displayed]);
 
-  // 段落に分割
   const paragraphs = displayed
     .split(/\n{2,}/)
     .map((p) => p.trim())
@@ -101,38 +93,38 @@ export default function NovelViewer({
           position: relative;
           height: 100%;
           overflow-y: auto;
-          background: #0e0c0a;
+          background: #faf8f4;
           scrollbar-width: thin;
-          scrollbar-color: rgba(200,185,154,0.15) transparent;
+          scrollbar-color: rgba(26,22,18,0.12) transparent;
         }
         .nv-root::-webkit-scrollbar { width: 3px; }
         .nv-root::-webkit-scrollbar-track { background: transparent; }
         .nv-root::-webkit-scrollbar-thumb {
-          background: rgba(200,185,154,0.2);
+          background: rgba(26,22,18,0.15);
           border-radius: 2px;
         }
         .nv-fade-top {
           position: sticky;
           top: 0;
-          height: 72px;
-          background: linear-gradient(to bottom, #0e0c0a 0%, transparent 100%);
+          height: 64px;
+          background: linear-gradient(to bottom, #faf8f4 0%, transparent 100%);
           pointer-events: none;
           z-index: 10;
-          margin-bottom: -72px;
+          margin-bottom: -64px;
         }
         .nv-fade-bottom {
           position: sticky;
           bottom: 0;
-          height: 100px;
-          background: linear-gradient(to top, #0e0c0a 0%, transparent 100%);
+          height: 80px;
+          background: linear-gradient(to top, #faf8f4 0%, transparent 100%);
           pointer-events: none;
           z-index: 10;
-          margin-top: -100px;
+          margin-top: -80px;
         }
         .nv-body {
           max-width: 600px;
           margin: 0 auto;
-          padding: 4rem 1.75rem 6rem;
+          padding: 3.5rem 1.75rem 5rem;
         }
         .nv-para {
           font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', serif;
@@ -140,21 +132,25 @@ export default function NovelViewer({
           font-weight: 300;
           line-height: 2.3;
           letter-spacing: 0.06em;
-          color: #f0ead8;
+          color: #1a1612;
           margin: 0 0 2em;
           text-align: justify;
           word-break: break-all;
         }
+
+        /* 墨滲みアニメ */
         @keyframes inkBleed {
-          0%   { opacity: 0; filter: blur(4px); transform: scale(0.93); }
-          60%  { opacity: 0.9; filter: blur(0.4px); transform: scale(1.01); }
+          0%   { opacity: 0; filter: blur(3px); transform: scale(0.94); }
+          60%  { opacity: 0.9; filter: blur(0.3px); }
           100% { opacity: 1; filter: blur(0); transform: scale(1); }
         }
         .nv-char {
           display: inline;
-          animation: inkBleed 0.32s ease-out both;
+          animation: inkBleed 0.3s ease-out both;
         }
-        @keyframes nvCursorBlink {
+
+        /* カーソル */
+        @keyframes nvBlink {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0; }
         }
@@ -162,47 +158,37 @@ export default function NovelViewer({
           display: inline-block;
           width: 1px;
           height: 1em;
-          background: #c8b99a;
+          background: rgba(26,22,18,0.5);
           margin-left: 2px;
           vertical-align: text-bottom;
-          animation: nvCursorBlink 1.06s step-end infinite;
+          animation: nvBlink 1s step-end infinite;
         }
-        @keyframes nvDotPulse {
-          0%, 100% { opacity: 0.2; transform: scale(0.8); }
-          50%       { opacity: 0.8; transform: scale(1); }
+
+        /* ローダードット */
+        @keyframes nvDot {
+          0%, 100% { opacity: 0.15; transform: scale(0.8); }
+          50%       { opacity: 0.6; transform: scale(1); }
         }
         .nv-dot {
           display: inline-block;
           width: 5px;
           height: 5px;
           border-radius: 50%;
-          background: rgba(200,185,154,0.5);
-          animation: nvDotPulse 1.2s ease-in-out infinite;
+          background: rgba(26,22,18,0.4);
+          animation: nvDot 1.2s ease-in-out infinite;
         }
         .nv-dot:nth-child(2) { animation-delay: 0.2s; }
         .nv-dot:nth-child(3) { animation-delay: 0.4s; }
-        .nv-washi {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          z-index: 0;
-          background-image: radial-gradient(
-            circle, rgba(200,185,154,0.03) 1px, transparent 1px
-          );
-          background-size: 28px 28px;
-        }
+
         @media (prefers-reduced-motion: reduce) {
           .nv-char   { animation: none; opacity: 1; filter: none; }
           .nv-cursor { animation: none; opacity: 1; }
-          .nv-dot    { animation: none; opacity: 0.5; }
+          .nv-dot    { animation: none; opacity: 0.4; }
         }
       `}</style>
 
-      <div className="nv-washi" aria-hidden />
-
       <div className="nv-root">
         <div className="nv-fade-top" aria-hidden />
-
         <div className="nv-body">
           {paragraphs.map((para, i) => {
             const isLast = i === paragraphs.length - 1;
@@ -214,16 +200,14 @@ export default function NovelViewer({
                       <span
                         key={j}
                         className="nv-char"
-                        style={{ animationDelay: `${Math.min(j * 0.008, 0.25)}s` }}
+                        style={{ animationDelay: `${Math.min(j * 0.007, 0.2)}s` }}
                       >
                         {ch}
                       </span>
                     ))}
                     <span className="nv-cursor" aria-hidden />
                   </>
-                ) : (
-                  para
-                )}
+                ) : para}
               </p>
             );
           })}
@@ -235,9 +219,9 @@ export default function NovelViewer({
               gap: "10px",
               marginTop: "3rem",
               fontFamily: "'Shippori Mincho', serif",
-              fontSize: "0.8rem",
+              fontSize: "0.78rem",
               letterSpacing: "0.2em",
-              color: "rgba(200,185,154,0.4)",
+              color: "rgba(26,22,18,0.35)",
             }}>
               <span className="nv-dot" />
               <span className="nv-dot" />
@@ -248,7 +232,6 @@ export default function NovelViewer({
 
           <div ref={bottomRef} />
         </div>
-
         <div className="nv-fade-bottom" aria-hidden />
       </div>
     </>
