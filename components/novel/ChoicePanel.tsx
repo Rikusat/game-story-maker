@@ -15,14 +15,8 @@ interface Props {
 }
 
 export default function ChoicePanel({
-  choice,
-  myVote,
-  countA,
-  countB,
-  totalPlayers,
-  onVote,
-  onTimeUp,
-  isHost,
+  choice, myVote, countA, countB, totalPlayers,
+  onVote, onTimeUp, isHost,
 }: Props) {
   const [seconds, setSeconds] = useState(30);
   const [visible, setVisible] = useState(false);
@@ -43,22 +37,21 @@ export default function ChoicePanel({
     return () => clearInterval(t);
   }, [choice.vote_deadline, isHost]);
 
-  // ── 巻物展開アニメーション ──
+  // ── 巻物展開アニメ ──
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 60);
     return () => clearTimeout(t);
   }, []);
 
-  const total = countA + countB;
-  const pctA  = total ? Math.round((countA / total) * 100) : 50;
-  const pctB  = 100 - pctA;
+  const total    = countA + countB;
+  const pctA     = total ? Math.round((countA / total) * 100) : 50;
+  const pctB     = 100 - pctA;
   const isUrgent = seconds <= 10;
 
-  // タイマーの円弧計算
-  const RADIUS = 22;
+  // SVGタイマー円弧
+  const RADIUS = 20;
   const CIRC   = 2 * Math.PI * RADIUS;
-  const progress = seconds / 30;
-  const dashOffset = CIRC * (1 - progress);
+  const dashOffset = CIRC * (1 - seconds / 30);
 
   return (
     <>
@@ -67,17 +60,15 @@ export default function ChoicePanel({
 
         .cp-panel {
           position: fixed;
-          bottom: 0;
-          left: 0;
-          right: 0;
+          bottom: 0; left: 0; right: 0;
           z-index: 100;
-          background: linear-gradient(180deg, #1a1510 0%, #1f1a14 100%);
-          border-top: 1px solid rgba(200,185,154,0.2);
-          border-radius: 16px 16px 0 0;
-          box-shadow: 0 -4px 40px rgba(0,0,0,0.6), 0 -1px 0 rgba(200,185,154,0.1);
+          background: #faf8f4;
+          border-top: 1px solid rgba(26,22,18,0.12);
+          border-radius: 14px 14px 0 0;
+          box-shadow: 0 -4px 32px rgba(26,22,18,0.08);
           transform: translateY(100%);
           opacity: 0;
-          transition: transform 0.45s cubic-bezier(0.16,1,0.3,1), opacity 0.35s ease;
+          transition: transform 0.42s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease;
           padding-bottom: env(safe-area-inset-bottom, 0px);
         }
         .cp-panel.cp-visible {
@@ -85,43 +76,43 @@ export default function ChoicePanel({
           opacity: 1;
         }
 
-        /* 上端の巻物装飾 */
-        .cp-scroll-top {
+        /* 上端装飾 */
+        .cp-top {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
           padding: 12px 20px 0;
         }
         .cp-rod {
           flex: 1;
           height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(200,185,154,0.35), transparent);
+          background: linear-gradient(90deg, transparent, rgba(26,22,18,0.15), transparent);
         }
-        .cp-label {
+        .cp-top-label {
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.68rem;
-          letter-spacing: 0.22em;
-          color: rgba(200,185,154,0.45);
+          font-size: 0.65rem;
+          letter-spacing: 0.2em;
+          color: rgba(26,22,18,0.35);
           white-space: nowrap;
         }
 
         .cp-inner {
-          padding: 14px 20px 20px;
+          padding: 12px 20px 18px;
           max-width: 600px;
           margin: 0 auto;
         }
 
-        /* ヘッダー：タイマー + 投票状況 */
+        /* ヘッダー */
         .cp-header {
           display: flex;
           align-items: center;
-          gap: 14px;
-          margin-bottom: 14px;
+          gap: 12px;
+          margin-bottom: 12px;
         }
         .cp-timer-wrap {
           position: relative;
-          width: 56px;
-          height: 56px;
+          width: 50px;
+          height: 50px;
           flex-shrink: 0;
         }
         .cp-timer-num {
@@ -131,16 +122,16 @@ export default function ChoicePanel({
           align-items: center;
           justify-content: center;
           font-family: 'Shippori Mincho', serif;
-          font-size: 1.05rem;
+          font-size: 1rem;
           font-weight: 500;
-          color: #c8b99a;
+          color: rgba(26,22,18,0.7);
           transition: color 0.3s;
         }
         .cp-timer-num.urgent {
-          color: #c0392b;
-          animation: cpUrgentPulse 0.6s ease-in-out infinite alternate;
+          color: #b03020;
+          animation: cpPulse 0.6s ease-in-out infinite alternate;
         }
-        @keyframes cpUrgentPulse {
+        @keyframes cpPulse {
           from { opacity: 0.7; transform: scale(0.95); }
           to   { opacity: 1;   transform: scale(1.05); }
         }
@@ -149,22 +140,22 @@ export default function ChoicePanel({
           align-items: baseline;
           gap: 3px;
         }
-        .cp-vote-count {
+        .cp-vote-n {
           font-family: 'Shippori Mincho', serif;
-          font-size: 1.5rem;
+          font-size: 1.4rem;
           font-weight: 500;
-          color: #f0ead8;
+          color: #1a1612;
           line-height: 1;
         }
-        .cp-vote-slash { color: rgba(240,234,216,0.25); font-size: 1rem; }
+        .cp-vote-slash { color: rgba(26,22,18,0.2); font-size: 0.9rem; }
         .cp-vote-total {
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.9rem;
-          color: rgba(240,234,216,0.45);
+          font-size: 0.85rem;
+          color: rgba(26,22,18,0.4);
         }
         .cp-vote-unit {
-          font-size: 0.7rem;
-          color: rgba(240,234,216,0.35);
+          font-size: 0.65rem;
+          color: rgba(26,22,18,0.3);
           margin-left: 2px;
         }
 
@@ -172,141 +163,135 @@ export default function ChoicePanel({
         .cp-choices {
           display: flex;
           flex-direction: column;
-          gap: 9px;
+          gap: 8px;
         }
         .cp-btn {
           position: relative;
           width: 100%;
-          min-height: 54px;
-          padding: 13px 44px 13px 14px;
-          background: rgba(240,234,216,0.04);
-          border: 1px solid rgba(200,185,154,0.18);
-          border-radius: 6px;
+          min-height: 52px;
+          padding: 12px 40px 12px 14px;
+          background: #fff;
+          border: 1px solid rgba(26,22,18,0.12);
+          border-radius: 8px;
           cursor: pointer;
           overflow: hidden;
           text-align: left;
-          transition: background 0.2s, border-color 0.2s, transform 0.15s;
+          transition: background 0.18s, border-color 0.18s, transform 0.15s;
           font-family: inherit;
         }
         .cp-btn:not(:disabled):hover {
-          background: rgba(240,234,216,0.08);
-          border-color: rgba(200,185,154,0.4);
-          transform: translateX(3px);
+          background: rgba(26,22,18,0.03);
+          border-color: rgba(26,22,18,0.25);
+          transform: translateX(2px);
         }
         .cp-btn:disabled { cursor: default; }
         .cp-btn.chosen {
-          background: rgba(200,185,154,0.1);
-          border-color: rgba(200,185,154,0.5);
+          background: rgba(26,22,18,0.05);
+          border-color: rgba(26,22,18,0.35);
         }
-        .cp-btn.dimmed { opacity: 0.4; }
+        .cp-btn.dimmed { opacity: 0.38; }
 
         /* 投票バー */
         .cp-bar {
           position: absolute;
-          inset: 0;
-          background: linear-gradient(90deg, rgba(200,185,154,0.08) 0%, transparent 100%);
+          top: 0; left: 0; bottom: 0;
+          background: rgba(26,22,18,0.04);
           pointer-events: none;
           transition: width 0.7s ease;
         }
 
-        /* ボタン内ラベル */
+        /* ボタン内 */
         .cp-btn-inner {
           position: relative;
           display: flex;
           align-items: center;
-          gap: 9px;
+          gap: 10px;
         }
         .cp-letter {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 24px;
-          height: 24px;
+          width: 22px;
+          height: 22px;
           border-radius: 50%;
-          border: 1px solid rgba(200,185,154,0.3);
+          border: 1px solid rgba(26,22,18,0.2);
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.75rem;
+          font-size: 0.72rem;
           font-weight: 500;
-          color: #c8b99a;
+          color: rgba(26,22,18,0.55);
           flex-shrink: 0;
         }
         .cp-btn.chosen .cp-letter {
-          background: rgba(200,185,154,0.18);
-          border-color: #c8b99a;
+          background: rgba(26,22,18,0.08);
+          border-color: rgba(26,22,18,0.4);
+          color: rgba(26,22,18,0.8);
         }
         .cp-text {
           font-family: 'Noto Serif JP', serif;
-          font-size: 0.88rem;
+          font-size: 0.87rem;
           font-weight: 300;
-          color: #f0ead8;
+          color: #1a1612;
           line-height: 1.5;
           letter-spacing: 0.04em;
           flex: 1;
         }
         .cp-votes {
           position: absolute;
-          right: 14px;
+          right: 12px;
           top: 50%;
           transform: translateY(-50%);
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.8rem;
-          color: rgba(200,185,154,0.6);
+          font-size: 0.75rem;
+          color: rgba(26,22,18,0.4);
         }
         .cp-check {
           position: absolute;
-          right: 14px;
+          right: 12px;
           top: 50%;
           transform: translateY(-50%);
-          font-size: 0.55rem;
-          color: #c8b99a;
+          font-size: 0.5rem;
+          color: rgba(26,22,18,0.5);
         }
 
         /* ヒント */
         .cp-hint {
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.7rem;
-          color: rgba(200,185,154,0.38);
+          font-size: 0.68rem;
+          color: rgba(26,22,18,0.3);
           text-align: center;
-          margin-top: 12px;
+          margin-top: 10px;
           letter-spacing: 0.1em;
         }
 
         @media (prefers-reduced-motion: reduce) {
           .cp-panel { transition: opacity 0.2s; transform: none !important; }
           .cp-timer-num.urgent { animation: none; }
-          .cp-btn:not(:disabled):hover { transform: none; }
         }
       `}</style>
 
       <div className={`cp-panel${visible ? " cp-visible" : ""}`}>
-        {/* 巻物上端 */}
-        <div className="cp-scroll-top">
+        {/* 上端装飾 */}
+        <div className="cp-top">
           <div className="cp-rod" />
-          <span className="cp-label">― 物語の分岐 ―</span>
+          <span className="cp-top-label">― 物語の分岐 ―</span>
           <div className="cp-rod" />
         </div>
 
         <div className="cp-inner">
           {/* ヘッダー */}
           <div className="cp-header">
-            {/* SVGタイマー */}
             <div className="cp-timer-wrap" aria-label={`残り${seconds}秒`}>
-              <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden>
-                <circle
-                  cx="28" cy="28" r={RADIUS}
+              <svg width="50" height="50" viewBox="0 0 50 50" aria-hidden>
+                <circle cx="25" cy="25" r={RADIUS}
+                  fill="none" stroke="rgba(26,22,18,0.07)" strokeWidth="2" />
+                <circle cx="25" cy="25" r={RADIUS}
                   fill="none"
-                  stroke="rgba(240,234,216,0.07)"
-                  strokeWidth="2.5"
-                />
-                <circle
-                  cx="28" cy="28" r={RADIUS}
-                  fill="none"
-                  stroke={isUrgent ? "#c0392b" : "#c8b99a"}
-                  strokeWidth="2.5"
+                  stroke={isUrgent ? "#b03020" : "rgba(26,22,18,0.4)"}
+                  strokeWidth="2"
                   strokeLinecap="round"
                   strokeDasharray={CIRC}
                   strokeDashoffset={dashOffset}
-                  transform="rotate(-90 28 28)"
+                  transform="rotate(-90 25 25)"
                   style={{ transition: "stroke-dashoffset 1s linear, stroke 0.3s" }}
                 />
               </svg>
@@ -315,9 +300,8 @@ export default function ChoicePanel({
               </span>
             </div>
 
-            {/* 投票状況 */}
             <div className="cp-vote-status">
-              <span className="cp-vote-count">{countA + countB}</span>
+              <span className="cp-vote-n">{countA + countB}</span>
               <span className="cp-vote-slash">/</span>
               <span className="cp-vote-total">{totalPlayers}</span>
               <span className="cp-vote-unit">票</span>
@@ -341,19 +325,13 @@ export default function ChoicePanel({
                   disabled={!!myVote}
                   aria-pressed={isChosen}
                 >
-                  {/* 投票バー */}
-                  <span
-                    className="cp-bar"
+                  <span className="cp-bar"
                     style={{ width: myVote ? `${pct}%` : "0%" }}
-                    aria-hidden
-                  />
-
+                    aria-hidden />
                   <span className="cp-btn-inner">
                     <span className="cp-letter">{v}</span>
                     <span className="cp-text">{label}</span>
                   </span>
-
-                  {/* 票数 or チェックマーク */}
                   {myVote && count > 0 && (
                     <span className="cp-votes">{count}</span>
                   )}
@@ -365,10 +343,9 @@ export default function ChoicePanel({
             })}
           </div>
 
-          {/* ヒントテキスト */}
           <p className="cp-hint">
             {myVote
-              ? "投票しました。他のプレイヤーを待っています…"
+              ? "投票しました。次のシーンへ…"
               : isUrgent
               ? `あと ${seconds} 秒…`
               : "物語の行方を選んでください"}
