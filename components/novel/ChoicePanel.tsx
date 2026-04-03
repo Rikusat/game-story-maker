@@ -18,7 +18,7 @@ export default function ChoicePanel({
   choice, myVote, countA, countB, totalPlayers,
   onVote, onTimeUp, isHost,
 }: Props) {
-  const [seconds, setSeconds] = useState(30);
+  const [seconds, setSeconds] = useState(10);
   const [visible, setVisible] = useState(false);
 
   // ── タイマー（既存ロジック維持） ──
