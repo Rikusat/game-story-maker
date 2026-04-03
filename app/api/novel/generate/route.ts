@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       mbti_dimension: sceneConfig.dimension,
       choice_a_type: sceneConfig.typeA,
       choice_b_type: sceneConfig.typeB,
-      vote_deadline: new Date(Date.now() + 20_000).toISOString(), // 読書10秒 + 投票10秒
+      vote_deadline: new Date(Date.now() + 10_000).toISOString(), // 投票フェーズ10秒
     })
     .select()
     .single()
@@ -104,13 +104,10 @@ export async function POST(request: NextRequest) {
     .update({ full_text: newFullText, status: 'choice' })
     .eq('id', sessionId)
 
-  // 読書バッファ終了時刻（生成完了 + 10秒）
-  const readingDeadline = new Date(Date.now() + 10_000).toISOString()
-
   return NextResponse.json({
     text: storyText,
     choices: { a: parsedChoices.choice_a, b: parsedChoices.choice_b },
     sceneChoiceId: sceneChoice?.id,
-    readingDeadline,  // クライアントはここを監視して選択肢を表示する
+    // vote_deadline は DB に保存済み（投票フェーズで使用）
   })
 }
