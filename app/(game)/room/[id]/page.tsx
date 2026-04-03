@@ -45,14 +45,15 @@ export default function RoomPage() {
   const [roomCode, setRoomCode]       = useState("");
   const [voteCountA, setVoteCountA]   = useState(0);
   const [voteCountB, setVoteCountB]   = useState(0);
-  const [deadline, setDeadline]       = useState("");
+  const [deadline, setDeadline]           = useState("");
+  const [readingDeadline, setReadingDeadline] = useState("");
 
   const sessionIdRef     = useRef("");
   const sceneNumberRef   = useRef(0);
   const sceneChoiceIdRef = useRef("");
   const userIdRef        = useRef("");
   const generatingRef    = useRef(false);
-  const pendingOnDoneRef = useRef<(() => void) | undefined>(undefined);
+
 
   // ── 初期化 ──
   useEffect(() => {
@@ -92,6 +93,7 @@ export default function RoomPage() {
         setChoices({ a: sc.choice_a ?? "", b: sc.choice_b ?? "" });
         setDisplayText(session.full_text ?? "");
         setSceneLabel(SCENE_CHAPTER_LABELS[sc.scene_number] ?? "");
+        setReadingDeadline(""); // 既存セッション復元時は即選択肢表示
         setPhase("choosing"); return;
       }
     }
@@ -145,13 +147,15 @@ export default function RoomPage() {
         });
       } else {
         sceneChoiceIdRef.current = data.sceneChoiceId ?? "";
-        const dl = data.deadline ?? new Date(Date.now() + 30_000).toISOString();
+        const dl = data.deadline ?? new Date(Date.now() + 20_000).toISOString();
         setDeadline(dl);
+        const rdl = data.readingDeadline ?? new Date(Date.now() + 10_000).toISOString();
+        setReadingDeadline(rdl);
         setChoices({
           a: data.choices?.a ?? "前に進む",
           b: data.choices?.b ?? "立ち止まる",
         });
-        animateText(data.text ?? "", () => setPhase("choosing"));
+        animateText(data.text ?? "");
       }
     } catch (err: any) {
       generatingRef.current = false;
@@ -160,19 +164,21 @@ export default function RoomPage() {
     }
   }, []);
 
-  // ── フェードイン表示 ──
-  const animateText = (text: string, onDone?: () => void) => {
-    if (!text) { onDone?.(); return; }
-    pendingOnDoneRef.current = onDone;
+  // ── フェードイン表示（readingDeadline が自動で choosing に遷移） ──
+  const animateText = (text: string) => {
+    if (!text) return;
     setDisplayText(text);
     setPhase("reading");
   };
 
-  const handleNextPage = () => {
-    const onDone = pendingOnDoneRef.current;
-    pendingOnDoneRef.current = undefined;
-    onDone?.();
-  };
+  // ── 読書バッファ：readingDeadline を監視して自動で choosing へ ──
+  useEffect(() => {
+    if (!readingDeadline || phase !== "reading") return;
+    const rem = new Date(readingDeadline).getTime() - Date.now();
+    if (rem <= 0) { setPhase("choosing"); return; }
+    const t = setTimeout(() => setPhase("choosing"), rem);
+    return () => clearTimeout(t);
+  }, [readingDeadline, phase]);
 
   // ── 投票 ──
   const handleVote = async (choice: "A" | "B") => {
@@ -356,33 +362,36 @@ export default function RoomPage() {
           letter-spacing: 0.12em;
         }
 
-        /* ── 次へボタン ── */
-        .rp-next-wrap {
+        /* ── 読書バッファカウントダウン ── */
+        .rp-reading-bar {
           position: sticky;
           bottom: 0;
-          display: flex;
-          justify-content: flex-end;
-          padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+          padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px));
           background: linear-gradient(to top, #faf8f4 60%, transparent);
-          pointer-events: none;
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
-        .rp-next-btn {
-          pointer-events: all;
+        .rp-reading-track {
+          flex: 1;
+          height: 2px;
+          background: rgba(26,22,18,0.08);
+          border-radius: 2px;
+          overflow: hidden;
+        }
+        .rp-reading-fill {
+          height: 100%;
+          background: rgba(26,22,18,0.35);
+          border-radius: 2px;
+          transition: width 1s linear;
+        }
+        .rp-reading-sec {
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.85rem;
-          font-weight: 500;
-          letter-spacing: 0.18em;
-          color: rgba(26,22,18,0.75);
-          background: #faf8f4;
-          border: 1px solid rgba(26,22,18,0.2);
-          border-radius: 100px;
-          padding: 10px 24px;
-          cursor: pointer;
-          transition: background 0.18s, border-color 0.18s;
-        }
-        .rp-next-btn:hover {
-          background: rgba(26,22,18,0.06);
-          border-color: rgba(26,22,18,0.35);
+          font-size: 0.7rem;
+          color: rgba(26,22,18,0.3);
+          letter-spacing: 0.08em;
+          min-width: 36px;
+          text-align: right;
         }
       `}</style>
 
@@ -459,13 +468,9 @@ export default function RoomPage() {
               />
             )}
 
-          {/* 次へボタン */}
-          {phase === "reading" && (
-            <div className="rp-next-wrap">
-              <button className="rp-next-btn" onClick={handleNextPage}>
-                次へ →
-              </button>
-            </div>
+          {/* 読書バッファ：残り時間表示 */}
+          {phase === "reading" && readingDeadline && (
+            <ReadingCountdown deadline={readingDeadline} />
           )}
 
           {/* 投票待ち */}
@@ -496,5 +501,35 @@ export default function RoomPage() {
         )}
       </div>
     </>
+  );
+}
+
+
+// ── 読書バッファのカウントダウンバー ──
+function ReadingCountdown({ deadline }: { deadline: string }) {
+  const [pct, setPct] = useState(100);
+  const [sec, setSec] = useState(10);
+
+  useEffect(() => {
+    const TOTAL = 10_000;
+    const update = () => {
+      const rem = Math.max(0, new Date(deadline).getTime() - Date.now());
+      setPct((rem / TOTAL) * 100);
+      setSec(Math.ceil(rem / 1000));
+    };
+    update();
+    const t = setInterval(update, 200);
+    return () => clearInterval(t);
+  }, [deadline]);
+
+  return (
+    <div className="rp-reading-bar">
+      <div className="rp-reading-track">
+        <div className="rp-reading-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="rp-reading-sec">
+        {sec > 0 ? `${sec}秒` : "選択中…"}
+      </span>
+    </div>
   );
 }
