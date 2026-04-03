@@ -142,9 +142,9 @@ export default function RoomPage() {
       setSceneLabel(SCENE_CHAPTER_LABELS[scene] ?? "");
 
       if (data.completed) {
-        animateText(data.text ?? "", () => {
-          setTimeout(() => router.push(`/result/${roomId}`), 1500);
-        });
+        animateText(data.text ?? "");
+        // 最終シーンは読書バッファなしで1.5秒後にリザルトへ
+        setTimeout(() => router.push(`/result/${roomId}`), 1500);
       } else {
         sceneChoiceIdRef.current = data.sceneChoiceId ?? "";
         const dl = data.deadline ?? new Date(Date.now() + 20_000).toISOString();
