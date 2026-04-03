@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(winget --version)",
+      "Bash(choco --version)",
+      "Bash(nvm version:*)",
+      "Bash(winget install:*)",
+      "Bash(powershell:*)",
+      "Bash(where node:*)",
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(cmd.exe:*)"
+    ]
+  }
+}
