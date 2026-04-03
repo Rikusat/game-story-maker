@@ -46,7 +46,6 @@ export default function RoomPage() {
   const [voteCountA, setVoteCountA]   = useState(0);
   const [voteCountB, setVoteCountB]   = useState(0);
   const [deadline, setDeadline]           = useState("");
-  const [readingDeadline, setReadingDeadline] = useState("");
 
   const sessionIdRef     = useRef("");
   const sceneNumberRef   = useRef(0);
@@ -93,7 +92,6 @@ export default function RoomPage() {
         setChoices({ a: sc.choice_a ?? "", b: sc.choice_b ?? "" });
         setDisplayText(session.full_text ?? "");
         setSceneLabel(SCENE_CHAPTER_LABELS[sc.scene_number] ?? "");
-        setReadingDeadline(""); // 既存セッション復元時は即選択肢表示
         setPhase("choosing"); return;
       }
     }
@@ -149,8 +147,6 @@ export default function RoomPage() {
         sceneChoiceIdRef.current = data.sceneChoiceId ?? "";
         const dl = data.deadline ?? new Date(Date.now() + 20_000).toISOString();
         setDeadline(dl);
-        const rdl = data.readingDeadline ?? new Date(Date.now() + 10_000).toISOString();
-        setReadingDeadline(rdl);
         setChoices({
           a: data.choices?.a ?? "前に進む",
           b: data.choices?.b ?? "立ち止まる",
@@ -171,14 +167,21 @@ export default function RoomPage() {
     setPhase("reading");
   };
 
-  // ── 読書バッファ：readingDeadline を監視して自動で choosing へ ──
+  // ── 読書バッファ：45秒で自動的に choosing へ（次へボタンでも遷移可） ──
+  const READING_BUFFER_MS = 45_000;
+  const readingStartRef = useRef<number>(0);
+
   useEffect(() => {
-    if (!readingDeadline || phase !== "reading") return;
-    const rem = new Date(readingDeadline).getTime() - Date.now();
-    if (rem <= 0) { setPhase("choosing"); return; }
-    const t = setTimeout(() => setPhase("choosing"), rem);
+    if (phase !== "reading") return;
+    readingStartRef.current = Date.now();
+    const t = setTimeout(() => setPhase("choosing"), READING_BUFFER_MS);
     return () => clearTimeout(t);
-  }, [readingDeadline, phase]);
+  }, [phase]);
+
+  const handleNextPage = () => {
+    if (phase !== "reading") return;
+    setPhase("choosing");
+  };
 
   // ── 投票 ──
   const handleVote = async (choice: "A" | "B") => {
@@ -362,12 +365,35 @@ export default function RoomPage() {
           letter-spacing: 0.12em;
         }
 
-        /* ── 読書バッファカウントダウン ── */
-        .rp-reading-bar {
+        /* ── 読書バッファ：次へボタン + カウントダウンバー ── */
+        .rp-reading-footer {
           position: sticky;
           bottom: 0;
           padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px));
-          background: linear-gradient(to top, #faf8f4 60%, transparent);
+          background: linear-gradient(to top, #faf8f4 70%, transparent);
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .rp-next-btn {
+          align-self: flex-end;
+          font-family: 'Shippori Mincho', serif;
+          font-size: 0.85rem;
+          font-weight: 500;
+          letter-spacing: 0.18em;
+          color: rgba(26,22,18,0.75);
+          background: #faf8f4;
+          border: 1px solid rgba(26,22,18,0.22);
+          border-radius: 100px;
+          padding: 9px 22px;
+          cursor: pointer;
+          transition: background 0.18s, border-color 0.18s;
+        }
+        .rp-next-btn:hover {
+          background: rgba(26,22,18,0.05);
+          border-color: rgba(26,22,18,0.38);
+        }
+        .rp-reading-bar {
           display: flex;
           align-items: center;
           gap: 10px;
@@ -381,16 +407,16 @@ export default function RoomPage() {
         }
         .rp-reading-fill {
           height: 100%;
-          background: rgba(26,22,18,0.35);
+          background: rgba(26,22,18,0.2);
           border-radius: 2px;
           transition: width 1s linear;
         }
         .rp-reading-sec {
           font-family: 'Shippori Mincho', serif;
-          font-size: 0.7rem;
-          color: rgba(26,22,18,0.3);
-          letter-spacing: 0.08em;
-          min-width: 36px;
+          font-size: 0.68rem;
+          color: rgba(26,22,18,0.28);
+          letter-spacing: 0.06em;
+          min-width: 32px;
           text-align: right;
         }
       `}</style>
@@ -468,16 +494,20 @@ export default function RoomPage() {
               />
             )}
 
-          {/* 読書バッファ：残り時間表示 */}
-          {phase === "reading" && readingDeadline && (
-            <ReadingCountdown deadline={readingDeadline} />
+          {/* 読書バッファ：次へボタン + 残り時間バー */}
+          {phase === "reading" && (
+            <ReadingBar
+              startTime={readingStartRef.current}
+              totalMs={READING_BUFFER_MS}
+              onNext={handleNextPage}
+            />
           )}
 
           {/* 投票待ち */}
           {phase === "voting" && (
             <div className="rp-voting">
               <div className="rp-spinner" />
-              <span>次のシーンを準備中…</span>
+              <span>{myVote ? "相手の選択を待っています…" : "次のシーンを準備中…"}</span>
             </div>
           )}
         </main>
@@ -488,7 +518,7 @@ export default function RoomPage() {
             choice={makeSceneChoice(
               choices,
               sceneNumber,
-              deadline || new Date(Date.now() + 30_000).toISOString()
+              deadline || new Date(Date.now() + 10_000).toISOString()
             )}
             myVote={myVote}
             countA={voteCountA}
@@ -505,31 +535,45 @@ export default function RoomPage() {
 }
 
 
-// ── 読書バッファのカウントダウンバー ──
-function ReadingCountdown({ deadline }: { deadline: string }) {
+// ── 読書バッファ：次へボタン + カウントダウンバー ──
+function ReadingBar({
+  startTime,
+  totalMs,
+  onNext,
+}: {
+  startTime: number;
+  totalMs: number;
+  onNext: () => void;
+}) {
   const [pct, setPct] = useState(100);
-  const [sec, setSec] = useState(10);
+  const [sec, setSec] = useState(Math.ceil(totalMs / 1000));
 
   useEffect(() => {
-    const TOTAL = 10_000;
+    if (!startTime) return;
     const update = () => {
-      const rem = Math.max(0, new Date(deadline).getTime() - Date.now());
-      setPct((rem / TOTAL) * 100);
+      const elapsed = Date.now() - startTime;
+      const rem = Math.max(0, totalMs - elapsed);
+      setPct((rem / totalMs) * 100);
       setSec(Math.ceil(rem / 1000));
     };
     update();
-    const t = setInterval(update, 200);
+    const t = setInterval(update, 500);
     return () => clearInterval(t);
-  }, [deadline]);
+  }, [startTime, totalMs]);
 
   return (
-    <div className="rp-reading-bar">
-      <div className="rp-reading-track">
-        <div className="rp-reading-fill" style={{ width: `${pct}%` }} />
+    <div className="rp-reading-footer">
+      <button className="rp-next-btn" onClick={onNext}>
+        次へ →
+      </button>
+      <div className="rp-reading-bar">
+        <div className="rp-reading-track">
+          <div className="rp-reading-fill" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="rp-reading-sec">
+          {sec > 0 ? `${sec}秒` : ""}
+        </span>
       </div>
-      <span className="rp-reading-sec">
-        {sec > 0 ? `${sec}秒` : "選択中…"}
-      </span>
     </div>
   );
 }
