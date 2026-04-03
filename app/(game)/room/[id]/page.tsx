@@ -52,9 +52,7 @@ export default function RoomPage() {
   const sceneChoiceIdRef = useRef("");
   const userIdRef        = useRef("");
   const generatingRef    = useRef(false);
-  const animIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const animFullTextRef  = useRef("");
-  const animOnDoneRef    = useRef<(() => void) | undefined>(undefined);
+  const pendingOnDoneRef = useRef<(() => void) | undefined>(undefined);
 
   // ── 初期化 ──
   useEffect(() => {
@@ -162,32 +160,18 @@ export default function RoomPage() {
     }
   }, []);
 
-  // ── タイプライター ──
+  // ── フェードイン表示 ──
   const animateText = (text: string, onDone?: () => void) => {
     if (!text) { onDone?.(); return; }
-    if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-    animFullTextRef.current = text;
-    animOnDoneRef.current   = onDone;
+    pendingOnDoneRef.current = onDone;
+    setDisplayText(text);
     setPhase("reading");
-    setDisplayText(text[0]);
-    let i = 1;
-    animIntervalRef.current = setInterval(() => {
-      if (i >= text.length) {
-        clearInterval(animIntervalRef.current!);
-        animIntervalRef.current = null;
-        onDone?.(); return;
-      }
-      setDisplayText((d) => d + text[i]);
-      i++;
-    }, 18);
   };
 
-  const skipAnimation = () => {
-    if (phase !== "reading" || !animIntervalRef.current) return;
-    clearInterval(animIntervalRef.current);
-    animIntervalRef.current = null;
-    setDisplayText(animFullTextRef.current);
-    animOnDoneRef.current?.();
+  const handleNextPage = () => {
+    const onDone = pendingOnDoneRef.current;
+    pendingOnDoneRef.current = undefined;
+    onDone?.();
   };
 
   // ── 投票 ──
@@ -372,16 +356,33 @@ export default function RoomPage() {
           letter-spacing: 0.12em;
         }
 
-        /* ── スキップヒント ── */
-        .rp-skip {
-          position: absolute;
-          bottom: 12px;
-          right: 16px;
-          font-family: 'Shippori Mincho', serif;
-          font-size: 0.6rem;
-          color: rgba(26,22,18,0.22);
-          letter-spacing: 0.08em;
+        /* ── 次へボタン ── */
+        .rp-next-wrap {
+          position: sticky;
+          bottom: 0;
+          display: flex;
+          justify-content: flex-end;
+          padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+          background: linear-gradient(to top, #faf8f4 60%, transparent);
           pointer-events: none;
+        }
+        .rp-next-btn {
+          pointer-events: all;
+          font-family: 'Shippori Mincho', serif;
+          font-size: 0.85rem;
+          font-weight: 500;
+          letter-spacing: 0.18em;
+          color: rgba(26,22,18,0.75);
+          background: #faf8f4;
+          border: 1px solid rgba(26,22,18,0.2);
+          border-radius: 100px;
+          padding: 10px 24px;
+          cursor: pointer;
+          transition: background 0.18s, border-color 0.18s;
+        }
+        .rp-next-btn:hover {
+          background: rgba(26,22,18,0.06);
+          border-color: rgba(26,22,18,0.35);
         }
       `}</style>
 
@@ -422,8 +423,7 @@ export default function RoomPage() {
         {/* メイン */}
         <main
           className="rp-main"
-          onClick={phase === "reading" ? skipAnimation : undefined}
-          style={{ cursor: phase === "reading" ? "pointer" : "default" }}
+
         >
           {/* エラー */}
           {error && (
@@ -459,9 +459,13 @@ export default function RoomPage() {
               />
             )}
 
-          {/* スキップヒント */}
+          {/* 次へボタン */}
           {phase === "reading" && (
-            <p className="rp-skip">タップで全文表示</p>
+            <div className="rp-next-wrap">
+              <button className="rp-next-btn" onClick={handleNextPage}>
+                次へ →
+              </button>
+            </div>
           )}
 
           {/* 投票待ち */}
