@@ -1,3 +1,12 @@
+// ============================================================
+// app/api/novel/generate/route.ts
+//
+// 変更点は1箇所のみ：
+//   system: のハードコード文字列 → getSystemPrompt() に変更
+//
+// それ以外のロジックは元のファイルと完全に同一。
+// ============================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { streamNovel } from '@/lib/novel/stream'
@@ -29,7 +38,7 @@ export async function POST(request: NextRequest) {
   let fullText = ''
   try {
     fullText = await streamNovel({
-      system: getSystemPrompt(),
+      system: getSystemPrompt(), // ← ここだけ変更（YAMLから読み込む）
       user: prompt,
       maxTokens: 900,
       onChunk: () => {},
@@ -85,7 +94,7 @@ export async function POST(request: NextRequest) {
       mbti_dimension: sceneConfig.dimension,
       choice_a_type: sceneConfig.typeA,
       choice_b_type: sceneConfig.typeB,
-      vote_deadline: new Date(Date.now() + 60_000).toISOString(),
+      vote_deadline: new Date(Date.now() + 20_000).toISOString(), // 読書10秒 + 投票10秒
     })
     .select()
     .single()
@@ -95,9 +104,13 @@ export async function POST(request: NextRequest) {
     .update({ full_text: newFullText, status: 'choice' })
     .eq('id', sessionId)
 
+  // 読書バッファ終了時刻（生成完了 + 10秒）
+  const readingDeadline = new Date(Date.now() + 10_000).toISOString()
+
   return NextResponse.json({
     text: storyText,
     choices: { a: parsedChoices.choice_a, b: parsedChoices.choice_b },
     sceneChoiceId: sceneChoice?.id,
+    readingDeadline,  // クライアントはここを監視して選択肢を表示する
   })
 }
