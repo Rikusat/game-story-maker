@@ -48,6 +48,7 @@ export default function RoomPage() {
   const sceneChoiceIdRef   = useRef("");
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const botIdsRef          = useRef<string[]>([]);
+  const humanCountRef      = useRef(1);
 
   // ── 初期化 ──────────────────────────────────────────────
   useEffect(() => {
@@ -80,6 +81,7 @@ export default function RoomPage() {
       botIdsRef.current = bots.map((p: any) => p.id as string);
     }
     const humanPlayers = (players ?? []).filter((p: any) => !botIdsRef.current.includes(p.user_id));
+    humanCountRef.current = humanPlayers.length;
     setHumanCount(humanPlayers.length);
 
     // ── ゲーム開始前のロビー ────────────────────────────────
@@ -389,6 +391,7 @@ export default function RoomPage() {
 
     // ボットを除いた人間プレイヤーのみで判定
     const humanActive = active.filter((p: any) => !botIdsRef.current.includes(p.user_id));
+    humanCountRef.current = humanActive.length;
     setHumanCount(humanActive.length);
 
     const ready = humanActive.filter(
@@ -412,9 +415,44 @@ export default function RoomPage() {
     setVoteCountB((votes ?? []).filter((v: any) => v.choice === "B").length);
   };
 
-  // ── テキストページ「次へ」（サーバー経由でRLS回避） ──────
+  // ── テキストページ「次へ」 ────────────────────────────────
   const handleNextButton = async () => {
     if (myReady) return;
+
+    const pageNumber = currentPageRef.current;
+    const nextPage   = pageNumber + 1;
+
+    // ── 1人プレイ（ボットモード）：待機なしで即座に進む ──
+    if (humanCountRef.current <= 1) {
+      currentPageRef.current = nextPage;
+      setCurrentPage(nextPage);
+      setMyVote(null);
+      setMyReady(false);
+      setReadyCount(0);
+      setSceneChoice(null);
+      sceneChoiceIdRef.current = "";
+      setDisplayText("");
+      setVoteCountA(0);
+      setVoteCountB(0);
+      setPhase("generating");
+      if (isHostRef.current && generatingPageRef.current !== nextPage) {
+        generatingPageRef.current = nextPage;
+        startGenerating(nextPage);
+      }
+      // DB のセッション状態をバックグラウンドで更新
+      fetch("/api/vote", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "advance-page",
+          sessionId: sessionIdRef.current,
+          nextPage,
+        }),
+      }).catch(() => {});
+      return;
+    }
+
+    // ── 複数人プレイ：全員の「次へ」を待つ ───────────────
     setMyReady(true);
     setPhase("waiting");
 
@@ -427,14 +465,13 @@ export default function RoomPage() {
           sessionId:  sessionIdRef.current,
           roomId,
           userId:     userIdRef.current,
-          pageNumber: currentPageRef.current,
+          pageNumber,
         }),
       });
       const data = await res.json();
 
       // 全員 ready → Realtime を待たずにクライアント側でも即座にページ進行
       if (data.allReady) {
-        const nextPage = currentPageRef.current + 1;
         currentPageRef.current = nextPage;
         setCurrentPage(nextPage);
         setMyVote(null);
