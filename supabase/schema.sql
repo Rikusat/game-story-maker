@@ -189,3 +189,6 @@ alter table scene_choices alter column choice_b drop not null;
 
 -- room_players: 「次へ」ボタン同期用カラム
 alter table room_players add column if not exists ready_page int default null;
+
+-- room_players: ボットプレイヤー識別カラム
+alter table room_players add column if not exists is_bot boolean not null default false;

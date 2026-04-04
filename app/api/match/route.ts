@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
           { id: botId, username: `🤖ボット${i}` },
           { onConflict: "id" }
         );
-        await supabase.from("room_players").insert({ room_id: room.id, user_id: botId });
+        await supabase.from("room_players").insert({ room_id: room.id, user_id: botId, is_bot: true });
       }
       await supabase.from("rooms").update({ status: "playing" }).eq("id", room.id);
       await supabase

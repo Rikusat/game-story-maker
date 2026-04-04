@@ -23,6 +23,7 @@ export interface RoomPlayer {
   room_id: string;
   user_id: string;
   is_active: boolean;
+  is_bot: boolean;
   joined_at: string;
   ready_page?: number | null;
   profiles?: Profile | null;

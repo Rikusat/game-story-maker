@@ -79,16 +79,12 @@ export default function RoomPage() {
       .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
     setTotalPlayers((players ?? []).length);
 
-    // ボットを特定して人間プレイヤー数を設定（ソロモードでない場合のみ上書き）
-    const playerIds = (players ?? []).map((p: any) => p.user_id as string);
-    if (playerIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from("profiles").select("id, username").in("id", playerIds);
-      const bots = (profiles ?? []).filter((p: any) => (p.username as string).startsWith("🤖"));
-      botIdsRef.current = bots.map((p: any) => p.id as string);
-    }
+    // is_bot フィールドで確実にボット判定（プロフィール名依存を排除）
+    botIdsRef.current = (players ?? [])
+      .filter((p: any) => p.is_bot)
+      .map((p: any) => p.user_id as string);
     if (!isSoloMode) {
-      const humanPlayers = (players ?? []).filter((p: any) => !botIdsRef.current.includes(p.user_id));
+      const humanPlayers = (players ?? []).filter((p: any) => !p.is_bot);
       humanCountRef.current = humanPlayers.length;
       setHumanCount(humanPlayers.length);
     }
@@ -398,8 +394,8 @@ export default function RoomPage() {
     const active = players ?? [];
     setTotalPlayers(active.length);
 
-    // ボットを除いた人間プレイヤーのみで判定
-    const humanActive = active.filter((p: any) => !botIdsRef.current.includes(p.user_id));
+    // is_bot で確実にボット除外
+    const humanActive = active.filter((p: any) => !p.is_bot);
     humanCountRef.current = humanActive.length;
     setHumanCount(humanActive.length);
 
@@ -528,7 +524,7 @@ export default function RoomPage() {
     else                setVoteCountB((n) => n + 1);
 
     try {
-      await fetch("/api/vote", {
+      const res = await fetch("/api/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -537,6 +533,25 @@ export default function RoomPage() {
           userId: userIdRef.current,
         }),
       });
+      const data = await res.json();
+
+      // ソロモード: APIレスポンスで即座にページ進行（Realtimeを待たない）
+      if (humanCountRef.current <= 1 && data.nextPage > currentPageRef.current) {
+        const nextPage = data.nextPage as number;
+        currentPageRef.current = nextPage;
+        setCurrentPage(nextPage);
+        setMyVote(null);
+        setSceneChoice(null);
+        sceneChoiceIdRef.current = "";
+        setDisplayText("");
+        setVoteCountA(0);
+        setVoteCountB(0);
+        setPhase("generating");
+        if (isHostRef.current && generatingPageRef.current !== nextPage) {
+          generatingPageRef.current = nextPage;
+          startGenerating(nextPage);
+        }
+      }
     } catch (err: any) {
       setError(err.message ?? "投票に失敗しました");
       setMyVote(null);

@@ -20,23 +20,13 @@ export async function POST(request: NextRequest) {
     // 全プレイヤーの ready 状態を確認
     const { data: allPlayers } = await supabase
       .from("room_players")
-      .select("user_id, ready_page")
+      .select("user_id, ready_page, is_bot")
       .eq("room_id", roomId)
       .eq("is_active", true);
 
-    const playerIds = (allPlayers ?? []).map((p: any) => p.user_id as string);
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .in("id", playerIds);
-
-    const botIds = (profiles ?? [])
-      .filter((p: any) => (p.username as string).startsWith("🤖"))
-      .map((p: any) => p.id as string);
-
-    // 人間プレイヤーが全員 ready かチェック
+    // 人間プレイヤーが全員 ready かチェック（is_bot で確実に判定）
     const humanPlayers = (allPlayers ?? []).filter(
-      (p: any) => !botIds.includes(p.user_id)
+      (p: any) => !p.is_bot
     );
     const allReady =
       humanPlayers.length > 0 &&
@@ -72,23 +62,15 @@ export async function POST(request: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // ルームの全プレイヤーを取得
+  // ルームの全プレイヤーを取得（is_bot で確実にボット判定）
   const { data: allPlayers } = await supabase
     .from("room_players")
-    .select("user_id")
+    .select("user_id, is_bot")
     .eq("room_id", roomId)
     .eq("is_active", true);
 
-  const playerIds = (allPlayers ?? []).map((p: any) => p.user_id as string);
-
-  // ボットを特定して自動投票
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, username")
-    .in("id", playerIds);
-
-  const botIds   = (profiles ?? []).filter((p: any) => (p.username as string).startsWith("🤖")).map((p: any) => p.id as string);
-  const humanIds = playerIds.filter((id) => !botIds.includes(id));
+  const botIds   = (allPlayers ?? []).filter((p: any) => p.is_bot).map((p: any) => p.user_id as string);
+  const humanIds = (allPlayers ?? []).filter((p: any) => !p.is_bot).map((p: any) => p.user_id as string);
 
   for (const botId of botIds) {
     const botChoice = Math.random() < 0.5 ? "A" : "B";

@@ -136,22 +136,12 @@ export async function POST(request: NextRequest) {
   // ボットを自動 ready（ready_page = pageNumber）
   const { data: allPlayers } = await supabase
     .from('room_players')
-    .select('id, user_id')
+    .select('id, user_id, is_bot')
     .eq('room_id', session.room_id)
     .eq('is_active', true)
 
-  const playerIds = (allPlayers ?? []).map((p: any) => p.user_id as string)
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, username')
-    .in('id', playerIds)
-
-  const botUserIds = (profiles ?? [])
-    .filter((p: any) => (p.username as string).startsWith('🤖'))
-    .map((p: any) => p.id as string)
-
   for (const p of allPlayers ?? []) {
-    if (botUserIds.includes(p.user_id)) {
+    if (p.is_bot) {
       await supabase
         .from('room_players')
         .update({ ready_page: pageNumber })
