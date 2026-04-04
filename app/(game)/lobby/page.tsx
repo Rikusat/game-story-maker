@@ -30,6 +30,9 @@ export default function LobbyPage() {
       });
       const { room, error: err } = await res.json();
       if (err) throw new Error(err);
+      if (withBots) {
+        localStorage.setItem(`soloMode_${room.id}`, "1");
+      }
       router.push(`/room/${room.id}`);
     } catch (e: any) {
       setError(e.message);

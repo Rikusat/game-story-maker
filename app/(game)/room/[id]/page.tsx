@@ -68,11 +68,18 @@ export default function RoomPage() {
     setRoomCode(room.code ?? "");
     isHostRef.current = room.host_id === userIdRef.current;
 
+    // localStorage でソロモード（ボットと遊ぶ）かどうかを確認
+    const isSoloMode = localStorage.getItem(`soloMode_${roomId}`) === "1";
+    if (isSoloMode) {
+      humanCountRef.current = 1;
+      setHumanCount(1);
+    }
+
     const { data: players } = await supabase
       .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
     setTotalPlayers((players ?? []).length);
 
-    // ボットを特定して人間プレイヤー数を設定
+    // ボットを特定して人間プレイヤー数を設定（ソロモードでない場合のみ上書き）
     const playerIds = (players ?? []).map((p: any) => p.user_id as string);
     if (playerIds.length > 0) {
       const { data: profiles } = await supabase
@@ -80,9 +87,11 @@ export default function RoomPage() {
       const bots = (profiles ?? []).filter((p: any) => (p.username as string).startsWith("🤖"));
       botIdsRef.current = bots.map((p: any) => p.id as string);
     }
-    const humanPlayers = (players ?? []).filter((p: any) => !botIdsRef.current.includes(p.user_id));
-    humanCountRef.current = humanPlayers.length;
-    setHumanCount(humanPlayers.length);
+    if (!isSoloMode) {
+      const humanPlayers = (players ?? []).filter((p: any) => !botIdsRef.current.includes(p.user_id));
+      humanCountRef.current = humanPlayers.length;
+      setHumanCount(humanPlayers.length);
+    }
 
     // ── ゲーム開始前のロビー ────────────────────────────────
     if (room.status === "waiting") {
