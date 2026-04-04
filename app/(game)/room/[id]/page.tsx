@@ -39,6 +39,7 @@ export default function RoomPage() {
   const [humanCount, setHumanCount]       = useState(1);
   const [roomCode, setRoomCode]       = useState("");
   const [error, setError]             = useState("");
+  const [showChoicePanel, setShowChoicePanel] = useState(false);
 
   const sessionIdRef       = useRef("");
   const userIdRef          = useRef("");
@@ -231,6 +232,7 @@ export default function RoomPage() {
     setMyVote(null);
     setMyReady(false);
     setSceneChoice(null);
+    setShowChoicePanel(false);
     sceneChoiceIdRef.current = "";
     setVoteCountA(0);
     setVoteCountB(0);
@@ -350,6 +352,7 @@ export default function RoomPage() {
       setMyReady(false);
       setReadyCount(0);
       setSceneChoice(null);
+      setShowChoicePanel(false);
       sceneChoiceIdRef.current = "";
       setDisplayText("");
       setVoteCountA(0);
@@ -435,6 +438,7 @@ export default function RoomPage() {
       setMyReady(false);
       setReadyCount(0);
       setSceneChoice(null);
+      setShowChoicePanel(false);
       sceneChoiceIdRef.current = "";
       setDisplayText("");
       setVoteCountA(0);
@@ -483,6 +487,7 @@ export default function RoomPage() {
         setMyReady(false);
         setReadyCount(0);
         setSceneChoice(null);
+        setShowChoicePanel(false);
         sceneChoiceIdRef.current = "";
         setDisplayText("");
         setVoteCountA(0);
@@ -542,6 +547,7 @@ export default function RoomPage() {
         setCurrentPage(nextPage);
         setMyVote(null);
         setSceneChoice(null);
+        setShowChoicePanel(false);
         sceneChoiceIdRef.current = "";
         setDisplayText("");
         setVoteCountA(0);
@@ -878,8 +884,8 @@ export default function RoomPage() {
             displayText && (
               <>
                 <NovelViewer text={displayText} isGenerating={false} />
-                {/* ChoicePanel（固定表示）の高さ分だけ余白を確保して文章が隠れないようにする */}
-                {pageType === "choice" && (
+                {/* ChoicePanel表示中の高さ分だけ余白を確保して文章が隠れないようにする */}
+                {pageType === "choice" && showChoicePanel && (
                   <div style={{ height: "280px", flexShrink: 0 }} aria-hidden />
                 )}
               </>
@@ -902,18 +908,32 @@ export default function RoomPage() {
           )}
         </main>}
 
-        {/* CHOICEページ：ChoicePanel（常に下部固定） */}
+        {/* CHOICEページ：「行方を選択する」ボタン → ChoicePanel */}
         {phase !== "lobby" && phase === "reading" && pageType === "choice" && sceneChoice && (
-          <ChoicePanel
-            choice={sceneChoice}
-            myVote={myVote}
-            countA={voteCountA}
-            countB={voteCountB}
-            totalPlayers={totalPlayers}
-            onVote={handleVote}
-            onTimeUp={handleVoteTimeout}
-            isHost={isHostRef.current}
-          />
+          <>
+            {!showChoicePanel && (
+              <div className="rp-footer">
+                <button
+                  className="rp-next-btn"
+                  onClick={() => setShowChoicePanel(true)}
+                >
+                  行方を選択する →
+                </button>
+              </div>
+            )}
+            {showChoicePanel && (
+              <ChoicePanel
+                choice={sceneChoice}
+                myVote={myVote}
+                countA={voteCountA}
+                countB={voteCountB}
+                totalPlayers={totalPlayers}
+                onVote={handleVote}
+                onTimeUp={handleVoteTimeout}
+                isHost={isHostRef.current}
+              />
+            )}
+          </>
         )}
 
         {/* テキストページ・OP・SUMMARY：次へボタン＋カウントダウン */}

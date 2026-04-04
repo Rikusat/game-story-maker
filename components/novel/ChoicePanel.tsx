@@ -115,48 +115,9 @@ export default function ChoicePanel({
           height: 50px;
           flex-shrink: 0;
         }
-        .cp-timer-num {
-          position: absolute;
-          inset: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: 'Shippori Mincho', serif;
-          font-size: 1rem;
-          font-weight: 500;
-          color: rgba(26,22,18,0.7);
-          transition: color 0.3s;
-        }
-        .cp-timer-num.urgent {
-          color: #b03020;
-          animation: cpPulse 0.6s ease-in-out infinite alternate;
-        }
         @keyframes cpPulse {
-          from { opacity: 0.7; transform: scale(0.95); }
-          to   { opacity: 1;   transform: scale(1.05); }
-        }
-        .cp-vote-status {
-          display: flex;
-          align-items: baseline;
-          gap: 3px;
-        }
-        .cp-vote-n {
-          font-family: 'Shippori Mincho', serif;
-          font-size: 1.4rem;
-          font-weight: 500;
-          color: #1a1612;
-          line-height: 1;
-        }
-        .cp-vote-slash { color: rgba(26,22,18,0.2); font-size: 0.9rem; }
-        .cp-vote-total {
-          font-family: 'Shippori Mincho', serif;
-          font-size: 0.85rem;
-          color: rgba(26,22,18,0.4);
-        }
-        .cp-vote-unit {
-          font-size: 0.65rem;
-          color: rgba(26,22,18,0.3);
-          margin-left: 2px;
+          from { opacity: 0.7; }
+          to   { opacity: 1; }
         }
 
         /* 選択肢ボタン */
@@ -278,7 +239,7 @@ export default function ChoicePanel({
         </div>
 
         <div className="cp-inner">
-          {/* ヘッダー */}
+          {/* ヘッダー（タイマーゲージのみ） */}
           <div className="cp-header">
             <div className="cp-timer-wrap" aria-label={`残り${seconds}秒`}>
               <svg width="50" height="50" viewBox="0 0 50 50" aria-hidden>
@@ -295,16 +256,6 @@ export default function ChoicePanel({
                   style={{ transition: "stroke-dashoffset 1s linear, stroke 0.3s" }}
                 />
               </svg>
-              <span className={`cp-timer-num${isUrgent ? " urgent" : ""}`}>
-                {seconds}
-              </span>
-            </div>
-
-            <div className="cp-vote-status">
-              <span className="cp-vote-n">{countA + countB}</span>
-              <span className="cp-vote-slash">/</span>
-              <span className="cp-vote-total">{totalPlayers}</span>
-              <span className="cp-vote-unit">票</span>
             </div>
           </div>
 
@@ -344,11 +295,7 @@ export default function ChoicePanel({
           </div>
 
           <p className="cp-hint">
-            {myVote
-              ? "相手の選択を待っています…"
-              : isUrgent
-              ? `あと ${seconds} 秒…`
-              : "物語の行方を選んでください"}
+            {myVote ? "相手の選択を待っています…" : "物語の行方を選んでください"}
           </p>
         </div>
       </div>
