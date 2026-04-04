@@ -31,7 +31,6 @@ export async function POST(request: NextRequest) {
     await supabase.from("room_players").insert({ room_id: room.id, user_id: userId });
 
     if (withBots) {
-      // ボット2体を追加して即スタート
       for (let i = 1; i <= 2; i++) {
         const botId = crypto.randomUUID();
         await supabase.from("profiles").upsert(
@@ -43,7 +42,7 @@ export async function POST(request: NextRequest) {
       await supabase.from("rooms").update({ status: "playing" }).eq("id", room.id);
       await supabase
         .from("novel_sessions")
-        .insert({ room_id: room.id, status: "generating", current_scene: 0 });
+        .insert({ room_id: room.id, status: "generating", current_page: 0 });
     }
 
     return NextResponse.json({ room });
@@ -92,9 +91,20 @@ export async function POST(request: NextRequest) {
 
     await supabase.from("rooms").update({ status: "playing" }).eq("id", roomId);
 
+    // ボットモードで既にセッションが存在する場合は再利用する
+    const { data: existingSession } = await supabase
+      .from("novel_sessions")
+      .select("*")
+      .eq("room_id", roomId)
+      .maybeSingle();
+
+    if (existingSession) {
+      return NextResponse.json({ session: existingSession });
+    }
+
     const { data: session } = await supabase
       .from("novel_sessions")
-      .insert({ room_id: roomId, status: "generating", current_scene: 0 })
+      .insert({ room_id: roomId, status: "generating", current_page: 0 })
       .select()
       .single();
 

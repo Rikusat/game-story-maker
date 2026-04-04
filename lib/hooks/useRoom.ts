@@ -15,11 +15,7 @@ export function useRoom(roomId: string) {
   const fetchAll = async () => {
     const [{ data: r }, { data: p }, { data: s }] = await Promise.all([
       supabase.from("rooms").select("*").eq("id", roomId).single(),
-      supabase
-        .from("room_players")
-        .select("*, profiles(*)")
-        .eq("room_id", roomId)
-        .eq("is_active", true),
+      supabase.from("room_players").select("*, profiles(*)").eq("room_id", roomId).eq("is_active", true),
       supabase.from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle(),
     ]);
     if (r) setRoom(r as Room);
@@ -27,14 +23,15 @@ export function useRoom(roomId: string) {
     if (s) setSession(s as NovelSession);
   };
 
-  const fetchCurrentChoice = async (sessionId: string, sceneNumber: number) => {
-    const { data } = await supabase
+  const fetchCurrentChoice = async (sessionId: string, pageNumber: number) => {
+    const { data: arr } = await supabase
       .from("scene_choices")
       .select("*")
       .eq("novel_session_id", sessionId)
-      .eq("scene_number", sceneNumber)
-      .maybeSingle();
-    setCurrentChoice(data as SceneChoice | null);
+      .eq("page_number", pageNumber)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    setCurrentChoice((arr?.[0] ?? null) as SceneChoice | null);
   };
 
   useEffect(() => {
@@ -60,7 +57,7 @@ export function useRoom(roomId: string) {
           const s = payload.new as NovelSession;
           setSession(s);
           if (s.status === "choice") {
-            fetchCurrentChoice(s.id, s.current_scene - 1);
+            fetchCurrentChoice(s.id, s.current_page);
           }
         }
       )
@@ -80,14 +77,13 @@ export function useRoom(roomId: string) {
     };
   }, [roomId]);
 
-  // session が変わったとき choice を取得
   useEffect(() => {
     if (session?.status === "choice") {
-      fetchCurrentChoice(session.id, session.current_scene - 1);
+      fetchCurrentChoice(session.id, session.current_page);
     } else {
       setCurrentChoice(null);
     }
-  }, [session?.status, session?.current_scene]);
+  }, [session?.status, session?.current_page]);
 
   return { room, players, session, currentChoice, refetch: fetchAll };
 }

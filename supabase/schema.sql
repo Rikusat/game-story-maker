@@ -159,3 +159,33 @@ $$ language plpgsql security definer;
 create or replace trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- =====================
+-- Migration: 17ページ構成対応
+-- =====================
+
+-- novel_sessions: current_scene → current_page
+alter table novel_sessions rename column current_scene to current_page;
+
+-- novel_sessions: status に 'reading' を追加
+alter table novel_sessions drop constraint if exists novel_sessions_status_check;
+alter table novel_sessions add constraint novel_sessions_status_check
+  check (status in ('generating', 'reading', 'choice', 'completed'));
+
+-- novel_sessions: mbti_result 削除
+alter table novel_sessions drop column if exists mbti_result;
+
+-- scene_choices: MBTI列削除
+alter table scene_choices drop column if exists mbti_dimension;
+alter table scene_choices drop column if exists choice_a_type;
+alter table scene_choices drop column if exists choice_b_type;
+
+-- scene_choices: page_number追加
+alter table scene_choices add column if not exists page_number int not null default 0;
+
+-- scene_choices: choice_a/choice_b を nullable に（テキストページは null）
+alter table scene_choices alter column choice_a drop not null;
+alter table scene_choices alter column choice_b drop not null;
+
+-- room_players: 「次へ」ボタン同期用カラム
+alter table room_players add column if not exists ready_page int default null;

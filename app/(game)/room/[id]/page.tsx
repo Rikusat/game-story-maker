@@ -3,131 +3,258 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { MBTI_SCENES } from "@/types";
 import NovelViewer from "@/components/novel/NovelViewer";
 import ChoicePanel from "@/components/novel/ChoicePanel";
+import type { SceneChoice } from "@/types";
 
-const SCENE_CHAPTER_LABELS = ["起", "承", "転", "結"];
+// ── ページタイプ ──────────────────────────────────────────
+type PageType = "op" | "text" | "choice" | "summary" | "ending";
+type Phase    = "init" | "lobby" | "generating" | "reading" | "voting" | "waiting" | "ending";
 
-type Phase = "init" | "generating" | "reading" | "choosing" | "voting";
-
-interface Choices { a: string; b: string; }
-
-function makeSceneChoice(choices: Choices, sceneNumber: number, deadline: string) {
-  return {
-    id: "",
-    novel_session_id: "",
-    scene_number: sceneNumber,
-    story_segment: "",
-    choice_a: choices.a,
-    choice_b: choices.b,
-    mbti_dimension: "EI" as const,
-    choice_a_type: "E" as const,
-    choice_b_type: "I" as const,
-    vote_deadline: deadline,
-    winning_choice: null,
-    created_at: new Date().toISOString(),
-  };
+function getPageType(page: number): PageType {
+  if (page === 0)  return "op";
+  if (page === 16) return "ending";
+  if (page === 15) return "summary";
+  if (page % 2 === 0 && page >= 2 && page <= 14) return "choice";
+  return "text";
 }
 
+// ─────────────────────────────────────────────────────────
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
-  const router   = useRouter();
-  const supabase = createClient();
+  const router         = useRouter();
+  const supabase       = createClient();
 
   const [phase, setPhase]             = useState<Phase>("init");
   const [displayText, setDisplayText] = useState("");
-  const [choices, setChoices]         = useState<Choices | null>(null);
+  const [sceneChoice, setSceneChoice] = useState<SceneChoice | null>(null);
   const [myVote, setMyVote]           = useState<"A" | "B" | null>(null);
-  const [sceneNumber, setSceneNumber] = useState(0);
-  const [sceneLabel, setSceneLabel]   = useState("");
-  const [error, setError]             = useState("");
-  const [roomCode, setRoomCode]       = useState("");
   const [voteCountA, setVoteCountA]   = useState(0);
   const [voteCountB, setVoteCountB]   = useState(0);
-  const [deadline, setDeadline]           = useState("");
+  const [currentPage, setCurrentPage] = useState(0);
+  const [deadline, setDeadline]       = useState("");
+  const [myReady, setMyReady]         = useState(false);
+  const [readyCount, setReadyCount]       = useState(0);
+  const [totalPlayers, setTotalPlayers]   = useState(1);
+  const [humanCount, setHumanCount]       = useState(1);
+  const [roomCode, setRoomCode]       = useState("");
+  const [error, setError]             = useState("");
 
-  const sessionIdRef     = useRef("");
-  const sceneNumberRef   = useRef(0);
-  const sceneChoiceIdRef = useRef("");
-  const userIdRef        = useRef("");
-  const generatingRef    = useRef(false);
+  const sessionIdRef       = useRef("");
+  const userIdRef          = useRef("");
+  const isHostRef          = useRef(false);
+  const generatingPageRef  = useRef<number | null>(null);
+  const currentPageRef     = useRef(0);
+  const sceneChoiceIdRef   = useRef("");
+  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const botIdsRef          = useRef<string[]>([]);
 
-
-  // ── 初期化 ──
+  // ── 初期化 ──────────────────────────────────────────────
   useEffect(() => {
     userIdRef.current = localStorage.getItem("userId") ?? "";
     init();
+    return () => {
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
   }, []);
 
   const init = async () => {
-    const { data: room } = await supabase
-      .from("rooms").select("*").eq("id", roomId).single();
+    const { data: room } = await supabase.from("rooms").select("*").eq("id", roomId).single();
     if (!room) { setError("ルームが見つかりません"); return; }
     setRoomCode(room.code ?? "");
+    isHostRef.current = room.host_id === userIdRef.current;
+
+    const { data: players } = await supabase
+      .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
+    setTotalPlayers((players ?? []).length);
+
+    // ボットを特定して人間プレイヤー数を設定
+    const playerIds = (players ?? []).map((p: any) => p.user_id as string);
+    if (playerIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles").select("id, username").in("id", playerIds);
+      const bots = (profiles ?? []).filter((p: any) => (p.username as string).startsWith("🤖"));
+      botIdsRef.current = bots.map((p: any) => p.id as string);
+    }
+    const humanPlayers = (players ?? []).filter((p: any) => !botIdsRef.current.includes(p.user_id));
+    setHumanCount(humanPlayers.length);
+
+    // ── ゲーム開始前のロビー ────────────────────────────────
+    if (room.status === "waiting") {
+      setPhase("lobby");
+      subscribeRoomStatus();
+      return;
+    }
 
     const { data: session } = await supabase
       .from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle();
+    if (!session) { setError("セッションが見つかりません"); return; }
 
-    if (!session) { setPhase("choosing"); return; }
+    sessionIdRef.current    = session.id;
+    const page              = session.current_page ?? 0;
+    currentPageRef.current  = page;
+    setCurrentPage(page);
 
-    sessionIdRef.current   = session.id;
-    sceneNumberRef.current = session.current_scene ?? 0;
-    setSceneNumber(session.current_scene ?? 0);
+    // ready カウント
+    const readyPlayers = (players ?? []).filter(
+      (p: any) => (p.ready_page ?? -1) >= page
+    );
+    setReadyCount(readyPlayers.length);
 
-    if (session.status === "completed") {
+    if (session.status === "completed" && page !== 16) {
       router.push(`/result/${roomId}`); return;
     }
 
-    if (session.status === "choice") {
-      const { data: sc } = await supabase
-        .from("scene_choices").select("*")
-        .eq("novel_session_id", session.id)
-        .eq("scene_number", (session.current_scene ?? 1) - 1)
-        .maybeSingle();
-      if (sc) {
-        sceneChoiceIdRef.current = sc.id;
-        const dl = sc.vote_deadline ?? new Date(Date.now() + 30_000).toISOString();
-        setDeadline(dl);
-        setChoices({ a: sc.choice_a ?? "", b: sc.choice_b ?? "" });
-        setDisplayText(session.full_text ?? "");
-        setSceneLabel(SCENE_CHAPTER_LABELS[sc.scene_number] ?? "");
-        setPhase("choosing"); return;
-      }
-    }
+    await loadPageContent(session.id, page, session.status ?? "generating");
 
-    startGenerating();
+    // ページ16以外はRealtime購読
+    if (page < 16) {
+      subscribeRealtime(session.id);
+    }
   };
 
-  // ── 生成 ──
-  const startGenerating = useCallback(async () => {
-    if (generatingRef.current) return;
-    generatingRef.current = true;
-    setPhase("generating");
-    setError(""); setMyVote(null); setChoices(null);
-    setVoteCountA(0); setVoteCountB(0);
-
-    try {
-      const scene = sceneNumberRef.current;
-      const sid   = sessionIdRef.current;
-
-      let previousChoiceText = "";
-      if (scene > 0) {
-        const { data: prev } = await supabase
-          .from("scene_choices").select("*")
-          .eq("novel_session_id", sid)
-          .eq("scene_number", scene - 1)
-          .maybeSingle();
-        if (prev?.winning_choice) {
-          previousChoiceText = prev.winning_choice === "A"
-            ? (prev.choice_a ?? "") : (prev.choice_b ?? "");
+  // ── ルームステータス購読（ロビー用）─────────────────────
+  const subscribeRoomStatus = () => {
+    if (realtimeChannelRef.current) return;
+    const channel = supabase
+      .channel(`room-lobby:${roomId}:${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
+        async (payload) => {
+          if (payload.new.status === "playing") {
+            // ロビー用チャンネルを切断してゲーム開始
+            if (realtimeChannelRef.current) {
+              supabase.removeChannel(realtimeChannelRef.current);
+              realtimeChannelRef.current = null;
+            }
+            // ゲーム開始：セッション取得→ゲームフロー
+            const { data: session } = await supabase
+              .from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle();
+            if (!session) { setError("セッションが見つかりません"); return; }
+            sessionIdRef.current   = session.id;
+            const page             = session.current_page ?? 0;
+            currentPageRef.current = page;
+            setCurrentPage(page);
+            await loadPageContent(session.id, page, session.status ?? "generating");
+            if (page < 16) subscribeRealtime(session.id);
+          }
         }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "room_players", filter: `room_id=eq.${roomId}` },
+        async () => {
+          const { data: players } = await supabase
+            .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
+          setTotalPlayers((players ?? []).length);
+        }
+      )
+      .subscribe();
+    realtimeChannelRef.current = channel;
+  };
+
+  // ── ゲーム開始（ホストのみ）─────────────────────────────
+  const handleStartGame = async () => {
+    const userId = userIdRef.current;
+    const res = await fetch("/api/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start", roomId, userId }),
+    });
+    const data = await res.json();
+    if (data.error) setError(data.error);
+    // Realtime が rooms UPDATE を検知して init() を再実行
+  };
+
+  // ── ページコンテンツ取得 ─────────────────────────────────
+  const loadPageContent = async (sessionId: string, page: number, status: string) => {
+    const { data: arr } = await supabase
+      .from("scene_choices")
+      .select("*")
+      .eq("novel_session_id", sessionId)
+      .eq("page_number", page)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    const sc = arr?.[0] ?? null;
+
+    if (sc) {
+      setDisplayText(sc.story_segment ?? "");
+      setDeadline(sc.vote_deadline ?? "");
+      setSceneChoice(sc as SceneChoice);
+      sceneChoiceIdRef.current = sc.id;
+
+      const pt = getPageType(page);
+
+      if (pt === "ending") {
+        setPhase("ending");
+        return;
       }
 
+      if (pt === "choice") {
+        const { data: votes } = await supabase
+          .from("votes").select("*").eq("scene_choice_id", sc.id);
+        const myPrev = (votes ?? []).find((v: any) => v.user_id === userIdRef.current);
+        setMyVote(myPrev?.choice ?? null);
+        setVoteCountA((votes ?? []).filter((v: any) => v.choice === "A").length);
+        setVoteCountB((votes ?? []).filter((v: any) => v.choice === "B").length);
+        setPhase(myPrev ? "voting" : "reading");
+        return;
+      }
+
+      setPhase("reading");
+    } else {
+      // コンテンツ未生成
+      setPhase("generating");
+      if (isHostRef.current && generatingPageRef.current !== page) {
+        generatingPageRef.current = page;
+        startGenerating(page);
+      }
+    }
+  };
+
+  // ── 生成 ────────────────────────────────────────────────
+  const startGenerating = useCallback(async (pageNumber: number) => {
+    setPhase("generating");
+    setError("");
+    setMyVote(null);
+    setMyReady(false);
+    setSceneChoice(null);
+    sceneChoiceIdRef.current = "";
+    setVoteCountA(0);
+    setVoteCountB(0);
+
+    // 直前の選択肢テキストを取得
+    let previousChoiceText = "";
+    try {
+      const { data: prevChoices } = await supabase
+        .from("scene_choices")
+        .select("*")
+        .eq("novel_session_id", sessionIdRef.current)
+        .not("winning_choice", "is", null)
+        .lt("page_number", pageNumber)
+        .order("page_number", { ascending: false })
+        .limit(1);
+      if (prevChoices && prevChoices.length > 0) {
+        const prev = prevChoices[0];
+        previousChoiceText = prev.winning_choice === "A"
+          ? (prev.choice_a ?? "") : (prev.choice_b ?? "");
+      }
+    } catch { /* 無視 */ }
+
+    try {
       const res = await fetch("/api/novel/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, sceneNumber: scene, previousChoiceText }),
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          pageNumber,
+          previousChoiceText,
+        }),
       });
 
       if (!res.ok) {
@@ -136,90 +263,259 @@ export default function RoomPage() {
       }
 
       const data = await res.json();
-      generatingRef.current = false;
-      setSceneLabel(SCENE_CHAPTER_LABELS[scene] ?? "");
+
+      setDisplayText(data.text ?? "");
 
       if (data.completed) {
-        animateText(data.text ?? "");
-        // 最終シーンは読書バッファなしで1.5秒後にリザルトへ
-        setTimeout(() => router.push(`/result/${roomId}`), 1500);
-      } else {
-        sceneChoiceIdRef.current = data.sceneChoiceId ?? "";
-        const dl = data.deadline ?? new Date(Date.now() + 20_000).toISOString();
-        setDeadline(dl);
-        setChoices({
-          a: data.choices?.a ?? "前に進む",
-          b: data.choices?.b ?? "立ち止まる",
-        });
-        animateText(data.text ?? "");
+        // ページ16（ED）
+        setDeadline("");
+        setPhase("ending");
+        // Realtimeは session update イベントで切断
+        return;
       }
+
+      if (data.choices) {
+        // CHOICEページ
+        const sc: SceneChoice = {
+          id:                data.sceneChoiceId ?? "",
+          novel_session_id:  sessionIdRef.current,
+          scene_number:      pageNumber,
+          page_number:       pageNumber,
+          story_segment:     data.text ?? "",
+          choice_a:          data.choices.a,
+          choice_b:          data.choices.b,
+          vote_deadline:     data.deadline ?? "",
+          winning_choice:    null,
+          created_at:        new Date().toISOString(),
+        };
+        setSceneChoice(sc);
+        sceneChoiceIdRef.current = sc.id;
+        setDeadline(data.deadline ?? "");
+      } else {
+        // TEXTページ
+        setDeadline(data.deadline ?? new Date(Date.now() + 60_000).toISOString());
+      }
+
+      setPhase("reading");
     } catch (err: any) {
-      generatingRef.current = false;
+      generatingPageRef.current = null;
       setError(err.message ?? "エラーが発生しました");
-      setPhase("choosing");
     }
   }, []);
 
-  // ── フェードイン表示（readingDeadline が自動で choosing に遷移） ──
-  const animateText = (text: string) => {
-    if (!text) return;
-    setDisplayText(text);
-    setPhase("reading");
+  // ── Realtime 購読 ────────────────────────────────────────
+  const subscribeRealtime = useCallback((sessionId: string) => {
+    if (realtimeChannelRef.current) return; // 既に購読済み
+
+    const channel = supabase
+      .channel(`room-game:${roomId}:${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "novel_sessions", filter: `id=eq.${sessionId}` },
+        (payload) => handleSessionUpdate(payload)
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "room_players", filter: `room_id=eq.${roomId}` },
+        () => handlePlayersUpdate()
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "votes" },
+        (payload) => handleVoteInsert(payload)
+      )
+      .subscribe();
+
+    realtimeChannelRef.current = channel;
+  }, []);
+
+  // ── session 変化ハンドラ ──────────────────────────────────
+  const handleSessionUpdate = async (payload: any) => {
+    const session  = payload.new;
+    const newPage  = session.current_page as number;
+    const newStatus = session.status as string;
+
+    if (newPage !== currentPageRef.current) {
+      // ページ変化
+      currentPageRef.current = newPage;
+      setCurrentPage(newPage);
+      setMyVote(null);
+      setMyReady(false);
+      setReadyCount(0);
+      setSceneChoice(null);
+      sceneChoiceIdRef.current = "";
+      setDisplayText("");
+      setVoteCountA(0);
+      setVoteCountB(0);
+
+      if (newPage === 16 || newStatus === "completed") {
+        // Realtime 切断
+        if (realtimeChannelRef.current) {
+          supabase.removeChannel(realtimeChannelRef.current);
+          realtimeChannelRef.current = null;
+        }
+      }
+
+      if (newStatus === "generating") {
+        setPhase("generating");
+        if (isHostRef.current && generatingPageRef.current !== newPage) {
+          generatingPageRef.current = newPage;
+          startGenerating(newPage);
+        }
+      } else {
+        await loadPageContent(sessionIdRef.current, newPage, newStatus);
+      }
+    } else {
+      // 同じページ、statusのみ変化（generating→reading/choice/completed）
+      if (
+        newStatus === "reading" ||
+        newStatus === "choice" ||
+        newStatus === "completed"
+      ) {
+        await loadPageContent(sessionIdRef.current, newPage, newStatus);
+      }
+    }
   };
 
-  // ── 読書バッファ：45秒で自動的に choosing へ（次へボタンでも遷移可） ──
-  const READING_BUFFER_MS = 45_000;
-  const readingStartRef = useRef<number>(0);
+  // ── room_players 変化ハンドラ ─────────────────────────────
+  const handlePlayersUpdate = async () => {
+    const pt = getPageType(currentPageRef.current);
+    if (pt === "choice") return; // CHOICEページはready_page不使用
 
-  useEffect(() => {
-    if (phase !== "reading") return;
-    readingStartRef.current = Date.now();
-    const t = setTimeout(() => setPhase("choosing"), READING_BUFFER_MS);
-    return () => clearTimeout(t);
-  }, [phase]);
+    const { data: players } = await supabase
+      .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
+    const active = players ?? [];
+    setTotalPlayers(active.length);
 
-  const handleNextPage = () => {
-    if (phase !== "reading") return;
-    setPhase("choosing");
+    // ボットを除いた人間プレイヤーのみで判定
+    const humanActive = active.filter((p: any) => !botIdsRef.current.includes(p.user_id));
+    setHumanCount(humanActive.length);
+
+    const ready = humanActive.filter(
+      (p: any) => (p.ready_page ?? -1) >= currentPageRef.current
+    );
+    setReadyCount(ready.length);
+
+    if (ready.length >= humanActive.length && humanActive.length > 0) {
+      advancePage();
+    }
   };
 
-  // ── 投票 ──
-  const handleVote = async (choice: "A" | "B") => {
-    if (myVote || phase !== "choosing") return;
-    setMyVote(choice);
-    setPhase("voting");
-    if (choice === "A") setVoteCountA((n) => n + 1);
-    else                setVoteCountB((n) => n + 1);
+  // ── 投票 INSERT ハンドラ ──────────────────────────────────
+  const handleVoteInsert = async (payload: any) => {
+    const vote = payload.new;
+    if (vote.scene_choice_id !== sceneChoiceIdRef.current) return;
+
+    const { data: votes } = await supabase
+      .from("votes").select("choice").eq("scene_choice_id", sceneChoiceIdRef.current);
+    setVoteCountA((votes ?? []).filter((v: any) => v.choice === "A").length);
+    setVoteCountB((votes ?? []).filter((v: any) => v.choice === "B").length);
+  };
+
+  // ── テキストページ「次へ」（サーバー経由でRLS回避） ──────
+  const handleNextButton = async () => {
+    if (myReady) return;
+    setMyReady(true);
+    setPhase("waiting");
 
     try {
       const res = await fetch("/api/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sceneChoiceId: sceneChoiceIdRef.current,
+          action:     "player-ready",
+          sessionId:  sessionIdRef.current,
+          roomId,
+          userId:     userIdRef.current,
+          pageNumber: currentPageRef.current,
+        }),
+      });
+      const data = await res.json();
+
+      // 全員 ready → Realtime を待たずにクライアント側でも即座にページ進行
+      if (data.allReady) {
+        const nextPage = currentPageRef.current + 1;
+        currentPageRef.current = nextPage;
+        setCurrentPage(nextPage);
+        setMyVote(null);
+        setMyReady(false);
+        setReadyCount(0);
+        setSceneChoice(null);
+        sceneChoiceIdRef.current = "";
+        setDisplayText("");
+        setVoteCountA(0);
+        setVoteCountB(0);
+        setPhase("generating");
+        if (isHostRef.current && generatingPageRef.current !== nextPage) {
+          generatingPageRef.current = nextPage;
+          startGenerating(nextPage);
+        }
+      }
+    } catch { /* Realtime フォールバックで進行 */ }
+  };
+
+  // ── ページ進行 ────────────────────────────────────────────
+  const advancePage = async () => {
+    const nextPage = currentPageRef.current + 1;
+    await fetch("/api/vote", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "advance-page",
+        sessionId: sessionIdRef.current,
+        nextPage,
+      }),
+    });
+  };
+
+  // ── テキストページ タイムアウト ──────────────────────────
+  const handleTextTimeout = useCallback(() => {
+    if (!myReady) handleNextButton();
+  }, [myReady]);
+
+  // ── 投票 ─────────────────────────────────────────────────
+  const handleVote = async (choice: "A" | "B") => {
+    if (myVote || !sceneChoice) return;
+    setMyVote(choice);
+    setPhase("voting");
+    if (choice === "A") setVoteCountA((n) => n + 1);
+    else                setVoteCountB((n) => n + 1);
+
+    try {
+      await fetch("/api/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneChoiceId: sceneChoice.id,
           choice, roomId,
           userId: userIdRef.current,
         }),
       });
-      const data = await res.json();
-      if (data.completed) { router.push(`/result/${roomId}`); return; }
-      sceneNumberRef.current = data.nextScene ?? sceneNumberRef.current + 1;
-      setSceneNumber(sceneNumberRef.current);
-      setDisplayText("");
-      startGenerating();
     } catch (err: any) {
       setError(err.message ?? "投票に失敗しました");
-      setMyVote(null); setPhase("choosing");
+      setMyVote(null);
+      setPhase("reading");
     }
   };
 
-  // ── UI ──
+  // ── 投票タイムアウト ─────────────────────────────────────
+  const handleVoteTimeout = useCallback(() => {
+    if (!myVote) handleVote(Math.random() < 0.5 ? "A" : "B");
+  }, [myVote, sceneChoice]);
+
+  // ── ED「次へ」 ────────────────────────────────────────────
+  const handleEndingNext = () => {
+    router.push(`/result/${roomId}`);
+  };
+
+  const pageType = getPageType(currentPage);
+
+  // ── UI ──────────────────────────────────────────────────
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400&family=Shippori+Mincho:wght@400;500&display=swap');
 
-        /* ── ベース：白基調 ── */
         .rp-root {
           min-height: 100svh;
           background: #faf8f4;
@@ -228,7 +524,7 @@ export default function RoomPage() {
           flex-direction: column;
         }
 
-        /* ── ヘッダー ── */
+        /* ヘッダー */
         .rp-header {
           display: flex;
           align-items: center;
@@ -240,27 +536,20 @@ export default function RoomPage() {
           top: 0;
           z-index: 20;
         }
-        .rp-code-hint {
+        .rp-code-hint, .rp-scene-hint {
           font-family: 'Shippori Mincho', serif;
           font-size: 0.6rem;
           color: rgba(26,22,18,0.35);
           letter-spacing: 0.14em;
           margin-bottom: 2px;
         }
+        .rp-scene-hint { text-align: right; }
         .rp-code {
           font-family: 'Shippori Mincho', serif;
           font-size: 1.05rem;
           font-weight: 500;
           color: rgba(26,22,18,0.75);
           letter-spacing: 0.2em;
-        }
-        .rp-scene-hint {
-          font-family: 'Shippori Mincho', serif;
-          font-size: 0.6rem;
-          color: rgba(26,22,18,0.35);
-          letter-spacing: 0.14em;
-          text-align: right;
-          margin-bottom: 2px;
         }
         .rp-scene {
           font-family: 'Shippori Mincho', serif;
@@ -270,10 +559,10 @@ export default function RoomPage() {
           letter-spacing: 0.08em;
         }
 
-        /* ── 進捗バー ── */
+        /* 進捗バー */
         .rp-progress {
           display: flex;
-          gap: 4px;
+          gap: 3px;
           padding: 8px 20px 0;
           background: #faf8f4;
         }
@@ -287,7 +576,7 @@ export default function RoomPage() {
         .rp-prog-current { background: rgba(26,22,18,0.2); }
         .rp-prog-future  { background: rgba(26,22,18,0.08); }
 
-        /* ── メイン ── */
+        /* メイン */
         .rp-main {
           flex: 1;
           position: relative;
@@ -296,7 +585,7 @@ export default function RoomPage() {
           min-height: 0;
         }
 
-        /* ── 生成中 ── */
+        /* 生成中 */
         .rp-generating {
           flex: 1;
           display: flex;
@@ -307,8 +596,7 @@ export default function RoomPage() {
         }
         @keyframes rpSpin { to { transform: rotate(360deg); } }
         .rp-spinner {
-          width: 28px;
-          height: 28px;
+          width: 28px; height: 28px;
           border: 1.5px solid rgba(26,22,18,0.1);
           border-top-color: rgba(26,22,18,0.45);
           border-radius: 50%;
@@ -320,14 +608,8 @@ export default function RoomPage() {
           color: rgba(26,22,18,0.4);
           letter-spacing: 0.18em;
         }
-        .rp-gen-chapter {
-          font-family: 'Shippori Mincho', serif;
-          font-size: 0.68rem;
-          color: rgba(26,22,18,0.25);
-          letter-spacing: 0.12em;
-        }
 
-        /* ── エラー ── */
+        /* エラー */
         .rp-error {
           margin: 16px 20px;
           background: rgba(180,50,40,0.06);
@@ -352,21 +634,21 @@ export default function RoomPage() {
           letter-spacing: 0.06em;
         }
 
-        /* ── 投票待ち ── */
-        .rp-voting {
+        /* 待機中 */
+        .rp-waiting {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 12px;
-          padding: 24px;
+          padding: 16px 24px;
           font-family: 'Shippori Mincho', serif;
           font-size: 0.8rem;
           color: rgba(26,22,18,0.35);
           letter-spacing: 0.12em;
         }
 
-        /* ── 読書バッファ：次へボタン + カウントダウンバー ── */
-        .rp-reading-footer {
+        /* フッター共通 */
+        .rp-footer {
           position: sticky;
           bottom: 0;
           padding: 10px 20px calc(10px + env(safe-area-inset-bottom, 0px));
@@ -393,31 +675,45 @@ export default function RoomPage() {
           background: rgba(26,22,18,0.05);
           border-color: rgba(26,22,18,0.38);
         }
-        .rp-reading-bar {
+        .rp-next-btn:disabled {
+          opacity: 0.45;
+          cursor: default;
+        }
+
+        /* カウントダウンバー */
+        .rp-countdown-bar {
           display: flex;
           align-items: center;
           gap: 10px;
         }
-        .rp-reading-track {
-          flex: 1;
-          height: 2px;
+        .rp-cd-track {
+          flex: 1; height: 2px;
           background: rgba(26,22,18,0.08);
           border-radius: 2px;
           overflow: hidden;
         }
-        .rp-reading-fill {
+        .rp-cd-fill {
           height: 100%;
           background: rgba(26,22,18,0.2);
           border-radius: 2px;
           transition: width 1s linear;
         }
-        .rp-reading-sec {
+        .rp-cd-sec {
           font-family: 'Shippori Mincho', serif;
           font-size: 0.68rem;
           color: rgba(26,22,18,0.28);
           letter-spacing: 0.06em;
           min-width: 32px;
           text-align: right;
+        }
+
+        /* ready カウント */
+        .rp-ready-label {
+          font-family: 'Shippori Mincho', serif;
+          font-size: 0.68rem;
+          color: rgba(26,22,18,0.35);
+          letter-spacing: 0.1em;
+          text-align: center;
         }
       `}</style>
 
@@ -429,25 +725,20 @@ export default function RoomPage() {
             <p className="rp-code">{roomCode || "…"}</p>
           </div>
           <div>
-            <p className="rp-scene-hint">シーン</p>
-            <p className="rp-scene">
-              {sceneNumber + 1} / 4
-              {sceneLabel && (
-                <span style={{ marginLeft: "6px", opacity: 0.5 }}>「{sceneLabel}」</span>
-              )}
-            </p>
+            <p className="rp-scene-hint">ページ</p>
+            <p className="rp-scene">{currentPage} / 16</p>
           </div>
         </header>
 
-        {/* 進捗バー */}
+        {/* 進捗バー（17分割） */}
         <div className="rp-progress">
-          {MBTI_SCENES.map((s, i) => (
+          {Array.from({ length: 17 }, (_, i) => (
             <div
-              key={s.dimension}
+              key={i}
               className={`rp-prog-seg ${
-                i < sceneNumber
+                i < currentPage
                   ? "rp-prog-done"
-                  : i === sceneNumber && phase !== "init"
+                  : i === currentPage && phase !== "init"
                   ? "rp-prog-current"
                   : "rp-prog-future"
               }`}
@@ -455,11 +746,44 @@ export default function RoomPage() {
           ))}
         </div>
 
-        {/* メイン */}
-        <main
-          className="rp-main"
+        {/* ロビー */}
+        {phase === "lobby" && (
+          <main className="rp-main" style={{ alignItems: "center", justifyContent: "center", display: "flex", flexDirection: "column", gap: 24, padding: "40px 24px" }}>
+            <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.72rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.14em" }}>合言葉</p>
+            <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "2.4rem", fontWeight: 500, letterSpacing: "0.3em", color: "rgba(26,22,18,0.8)" }}>{roomCode}</p>
+            <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.78rem", color: "rgba(26,22,18,0.4)", letterSpacing: "0.1em" }}>
+              参加者 {totalPlayers} 人
+            </p>
+            {isHostRef.current ? (
+              <button
+                onClick={handleStartGame}
+                style={{
+                  marginTop: 16,
+                  fontFamily: "'Shippori Mincho', serif",
+                  fontSize: "0.9rem",
+                  fontWeight: 500,
+                  letterSpacing: "0.18em",
+                  color: "rgba(26,22,18,0.85)",
+                  background: "#faf8f4",
+                  border: "1px solid rgba(26,22,18,0.3)",
+                  borderRadius: "100px",
+                  padding: "12px 32px",
+                  cursor: "pointer",
+                }}
+              >
+                ゲームを始める
+              </button>
+            ) : (
+              <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.8rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.12em" }}>
+                ホストを待っています…
+              </p>
+            )}
+            {error && <p style={{ color: "rgba(160,40,30,0.85)", fontSize: "0.8rem" }}>{error}</p>}
+          </main>
+        )}
 
-        >
+        {/* メイン */}
+        {phase !== "lobby" && <main className="rp-main">
           {/* エラー */}
           {error && (
             <div className="rp-error">
@@ -467,7 +791,10 @@ export default function RoomPage() {
               <br />
               <button
                 className="rp-retry"
-                onClick={(e) => { e.stopPropagation(); setError(""); startGenerating(); }}
+                onClick={() => {
+                  setError("");
+                  if (isHostRef.current) startGenerating(currentPage);
+                }}
               >
                 再試行する
               </button>
@@ -479,101 +806,120 @@ export default function RoomPage() {
             <div className="rp-generating">
               <div className="rp-spinner" />
               <p className="rp-gen-text">物語を紡いでいます</p>
-              {sceneLabel && (
-                <p className="rp-gen-chapter">第{sceneNumber + 1}章「{sceneLabel}」</p>
+            </div>
+          )}
+
+          {/* テキスト表示 */}
+          {(phase === "reading" ||
+            phase === "voting" ||
+            phase === "waiting" ||
+            phase === "ending") &&
+            displayText && (
+              <NovelViewer text={displayText} isGenerating={false} />
+            )}
+
+          {/* 投票待ち表示（CHOICEページ投票後） */}
+          {phase === "voting" && (
+            <div className="rp-waiting">
+              <div className="rp-spinner" />
+              <span>相手の選択を待っています…</span>
+            </div>
+          )}
+
+          {/* 待機表示（TEXTページ「次へ」後） */}
+          {phase === "waiting" && (
+            <div className="rp-waiting">
+              <div className="rp-spinner" />
+              <span>他のプレイヤーを待っています… ({readyCount}/{humanCount})</span>
+            </div>
+          )}
+        </main>}
+
+        {/* CHOICEページ：ChoicePanel（常に下部固定） */}
+        {phase !== "lobby" && phase === "reading" && pageType === "choice" && sceneChoice && (
+          <ChoicePanel
+            choice={sceneChoice}
+            myVote={myVote}
+            countA={voteCountA}
+            countB={voteCountB}
+            totalPlayers={totalPlayers}
+            onVote={handleVote}
+            onTimeUp={handleVoteTimeout}
+            isHost={isHostRef.current}
+          />
+        )}
+
+        {/* テキストページ・OP・SUMMARY：次へボタン＋カウントダウン */}
+        {(phase === "reading" || phase === "waiting") &&
+          pageType !== "choice" &&
+          pageType !== "ending" && (
+            <div className="rp-footer">
+              <button
+                className="rp-next-btn"
+                onClick={handleNextButton}
+                disabled={myReady}
+              >
+                {myReady ? `待機中… (${readyCount}/${humanCount})` : "次へ →"}
+              </button>
+              {deadline && (
+                <CountdownBar
+                  deadline={deadline}
+                  onTimeout={handleTextTimeout}
+                />
               )}
             </div>
           )}
 
-          {/* 物語テキスト */}
-          {(phase === "reading" || phase === "choosing" || phase === "voting") &&
-            displayText && (
-              <NovelViewer
-                text={displayText}
-                isGenerating={phase === "reading"}
-              />
-            )}
-
-          {/* 読書バッファ：次へボタン + 残り時間バー */}
-          {phase === "reading" && (
-            <ReadingBar
-              startTime={readingStartRef.current}
-              totalMs={READING_BUFFER_MS}
-              onNext={handleNextPage}
-            />
-          )}
-
-          {/* 投票待ち */}
-          {phase === "voting" && (
-            <div className="rp-voting">
-              <div className="rp-spinner" />
-              <span>{myVote ? "相手の選択を待っています…" : "次のシーンを準備中…"}</span>
-            </div>
-          )}
-        </main>
-
-        {/* 選択肢パネル */}
-        {phase === "choosing" && choices && (
-          <ChoicePanel
-            choice={makeSceneChoice(
-              choices,
-              sceneNumber,
-              deadline || new Date(Date.now() + 10_000).toISOString()
-            )}
-            myVote={myVote}
-            countA={voteCountA}
-            countB={voteCountB}
-            totalPlayers={1}
-            onVote={handleVote}
-            onTimeUp={() => { if (!myVote) handleVote(Math.random() < 0.5 ? "A" : "B"); }}
-            isHost={true}
-          />
+        {/* EDページ：次へボタンのみ */}
+        {phase === "ending" && (
+          <div className="rp-footer">
+            <button className="rp-next-btn" onClick={handleEndingNext}>
+              次へ →
+            </button>
+          </div>
         )}
       </div>
     </>
   );
 }
 
-
-// ── 読書バッファ：次へボタン + カウントダウンバー ──
-function ReadingBar({
-  startTime,
-  totalMs,
-  onNext,
+// ── カウントダウンバー ────────────────────────────────────
+function CountdownBar({
+  deadline,
+  onTimeout,
 }: {
-  startTime: number;
-  totalMs: number;
-  onNext: () => void;
+  deadline: string;
+  onTimeout: () => void;
 }) {
-  const [pct, setPct] = useState(100);
-  const [sec, setSec] = useState(Math.ceil(totalMs / 1000));
+  const TOTAL_MS        = 60_000;
+  const [pct, setPct]   = useState(100);
+  const [sec, setSec]   = useState(60);
+  const firedRef        = useRef(false);
 
   useEffect(() => {
-    if (!startTime) return;
+    if (!deadline) return;
+    firedRef.current = false;
+
     const update = () => {
-      const elapsed = Date.now() - startTime;
-      const rem = Math.max(0, totalMs - elapsed);
-      setPct((rem / totalMs) * 100);
+      const rem = Math.max(0, new Date(deadline).getTime() - Date.now());
+      setPct((rem / TOTAL_MS) * 100);
       setSec(Math.ceil(rem / 1000));
+      if (rem === 0 && !firedRef.current) {
+        firedRef.current = true;
+        onTimeout();
+      }
     };
     update();
     const t = setInterval(update, 500);
     return () => clearInterval(t);
-  }, [startTime, totalMs]);
+  }, [deadline]);
 
   return (
-    <div className="rp-reading-footer">
-      <button className="rp-next-btn" onClick={onNext}>
-        次へ →
-      </button>
-      <div className="rp-reading-bar">
-        <div className="rp-reading-track">
-          <div className="rp-reading-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <span className="rp-reading-sec">
-          {sec > 0 ? `${sec}秒` : ""}
-        </span>
+    <div className="rp-countdown-bar">
+      <div className="rp-cd-track">
+        <div className="rp-cd-fill" style={{ width: `${pct}%` }} />
       </div>
+      <span className="rp-cd-sec">{sec > 0 ? `${sec}秒` : ""}</span>
     </div>
   );
 }

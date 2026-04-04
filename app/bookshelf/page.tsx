@@ -37,7 +37,6 @@ export default async function BookshelfPage() {
           <div className="flex flex-col gap-4">
             {saved.map((s) => {
               const session = s.novel_sessions;
-              const mbti = session?.mbti_result;
               const preview = session?.full_text?.substring(0, 100) ?? "";
               return (
                 <Link
@@ -47,11 +46,6 @@ export default async function BookshelfPage() {
                 >
                   <div className="flex justify-between items-start mb-2">
                     <h2 className="text-gray-100 font-semibold text-lg">{s.title}</h2>
-                    {mbti && (
-                      <span className="text-indigo-400 font-bold text-sm bg-indigo-900/40 px-2 py-0.5 rounded">
-                        {mbti}
-                      </span>
-                    )}
                   </div>
                   <p className="text-gray-400 text-sm leading-relaxed">
                     {preview}

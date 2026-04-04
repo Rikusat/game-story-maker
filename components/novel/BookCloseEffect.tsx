@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 
 interface Props {
-  mbtiResult?: string | null;
   onDone: () => void;
 }
 
-export default function BookCloseEffect({ mbtiResult, onDone }: Props) {
+export default function BookCloseEffect({ onDone }: Props) {
   const [phase, setPhase] = useState<"open" | "closing" | "closed">("open");
 
   useEffect(() => {
@@ -32,11 +31,6 @@ export default function BookCloseEffect({ mbtiResult, onDone }: Props) {
         {/* 本のアイコン */}
         <div className="text-8xl text-center select-none">📖</div>
         <p className="text-center text-gray-300 mt-4 text-lg">物語が幕を閉じる…</p>
-        {mbtiResult && (
-          <p className="text-center text-indigo-400 mt-2 text-2xl font-bold tracking-widest">
-            {mbtiResult}
-          </p>
-        )}
       </div>
     </div>
   );

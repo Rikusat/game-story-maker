@@ -18,7 +18,7 @@ export default function ChoicePanel({
   choice, myVote, countA, countB, totalPlayers,
   onVote, onTimeUp, isHost,
 }: Props) {
-  const [seconds, setSeconds] = useState(10);
+  const [seconds, setSeconds] = useState(60);
   const [visible, setVisible] = useState(false);
 
   // ── タイマー（既存ロジック維持） ──
@@ -51,7 +51,7 @@ export default function ChoicePanel({
   // SVGタイマー円弧
   const RADIUS = 20;
   const CIRC   = 2 * Math.PI * RADIUS;
-  const dashOffset = CIRC * (1 - seconds / 30);
+  const dashOffset = CIRC * (1 - seconds / 60);
 
   return (
     <>
@@ -345,7 +345,7 @@ export default function ChoicePanel({
 
           <p className="cp-hint">
             {myVote
-              ? "投票しました。次のシーンへ…"
+              ? "相手の選択を待っています…"
               : isUrgent
               ? `あと ${seconds} 秒…`
               : "物語の行方を選んでください"}

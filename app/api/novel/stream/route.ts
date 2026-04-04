@@ -1,14 +1,21 @@
 import { NextRequest } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { streamNovel } from '@/lib/novel/stream'
-import { buildStoryPrompt } from '@/lib/claude/prompts'
+import { buildStoryPrompt, getSystemPrompt, type PageType } from '@/lib/claude/prompts'
 import { tallyAndAdvance } from '@/lib/game/tally'
-import { MBTI_SCENES } from '@/types'
+
+function getPageType(pageNumber: number): PageType {
+  if (pageNumber === 0)  return 'op'
+  if (pageNumber === 16) return 'ending'
+  if (pageNumber === 15) return 'summary'
+  if (pageNumber % 2 === 0 && pageNumber >= 2 && pageNumber <= 14) return 'choice'
+  return 'text'
+}
 
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
 
-  const { sessionId, sceneNumber, previousChoiceText } = await request.json()
+  const { sessionId, pageNumber, previousChoiceText } = await request.json()
 
   const { data: session } = await supabase
     .from('novel_sessions')
@@ -18,17 +25,19 @@ export async function POST(request: NextRequest) {
 
   if (!session) return new Response('Session not found', { status: 404 })
 
-  const isLastScene = sceneNumber >= 3
+  const pageType = getPageType(pageNumber)
+  const isEnding = pageType === 'ending'
+
   const prompt = buildStoryPrompt({
     previousText: session.full_text,
-    sceneNumber,
-    isLastScene,
+    pageNumber,
+    pageType,
     previousChoiceText,
   })
 
-  const encoder = new TextEncoder()
-  let rawBuffer  = ''
-  let storyBuffer = ''
+  const encoder    = new TextEncoder()
+  let rawBuffer    = ''
+  let storyBuffer  = ''
   let choicesStarted = false
   let lastDbUpdate = Date.now()
 
@@ -39,9 +48,9 @@ export async function POST(request: NextRequest) {
 
       try {
         await streamNovel({
-          system: 'あなたは日本語のインタラクティブノベルゲームのシナリオライターです。指示に従い、指定フォーマットで出力してください。',
+          system: getSystemPrompt(),
           user: prompt,
-          maxTokens: 700,
+          maxTokens: 900,
           onChunk: async (text) => {
             rawBuffer += text
 
@@ -58,11 +67,9 @@ export async function POST(request: NextRequest) {
                 storyBuffer += text
                 send({ type: 'chunk', content: text })
 
-                // 1秒ごとにDBへ中間保存（他プレイヤーのリアルタイム表示用）
                 if (Date.now() - lastDbUpdate > 1000) {
                   lastDbUpdate = Date.now()
-                  const accumulated =
-                    (session.full_text ? session.full_text + '\n\n' : '') + storyBuffer
+                  const accumulated = (session.full_text ? session.full_text + '\n\n' : '') + storyBuffer
                   await supabase
                     .from('novel_sessions')
                     .update({ full_text: accumulated })
@@ -73,82 +80,48 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        const newFullText =
-          (session.full_text ? session.full_text + '\n\n' : '') + storyBuffer
+        const newFullText = (session.full_text ? session.full_text + '\n\n' : '') + storyBuffer
+        const deadline    = new Date(Date.now() + 60_000).toISOString()
 
-        if (isLastScene) {
-          await supabase
-            .from('novel_sessions')
-            .update({ full_text: newFullText, status: 'completed' })
-            .eq('id', sessionId)
-
-          await supabase
-            .from('rooms')
-            .update({ status: 'finished' })
-            .eq('id', session.room_id)
-
+        if (isEnding) {
+          await supabase.from('scene_choices').insert({
+            novel_session_id: sessionId, scene_number: pageNumber, page_number: pageNumber,
+            story_segment: storyBuffer, choice_a: null, choice_b: null, vote_deadline: deadline,
+          })
+          await supabase.from('novel_sessions').update({ full_text: newFullText, status: 'completed' }).eq('id', sessionId)
+          await supabase.from('rooms').update({ status: 'finished' }).eq('id', session.room_id)
           send({ type: 'done', completed: true })
-        } else {
+        } else if (pageType === 'choice') {
           const choicesIdx = rawBuffer.indexOf('===CHOICES===')
           let parsedChoices: { choice_a: string; choice_b: string } | null = null
 
           if (choicesIdx !== -1) {
-            const jsonStr = rawBuffer
-              .substring(choicesIdx + 13)
-              .replace(/===END===/g, '')
-              .trim()
-            try {
-              parsedChoices = JSON.parse(jsonStr)
-            } catch {
+            const jsonStr = rawBuffer.substring(choicesIdx + 13).replace(/===END===/g, '').trim()
+            try { parsedChoices = JSON.parse(jsonStr) } catch {
               parsedChoices = { choice_a: '前に進む', choice_b: '立ち止まって考える' }
             }
           }
 
-          const sceneConfig = MBTI_SCENES[sceneNumber]
-          const deadline = new Date(Date.now() + 30_000).toISOString()
+          const { data: sceneChoice } = await supabase.from('scene_choices').insert({
+            novel_session_id: sessionId, scene_number: pageNumber, page_number: pageNumber,
+            story_segment: storyBuffer,
+            choice_a: parsedChoices?.choice_a ?? '前に進む',
+            choice_b: parsedChoices?.choice_b ?? '立ち止まる',
+            vote_deadline: deadline,
+          }).select().single()
 
-          const { data: sceneChoice } = await supabase
-            .from('scene_choices')
-            .insert({
-              novel_session_id: sessionId,
-              scene_number: sceneNumber,
-              story_segment: storyBuffer,
-              choice_a: parsedChoices?.choice_a ?? '前に進む',
-              choice_b: parsedChoices?.choice_b ?? '立ち止まる',
-              mbti_dimension: sceneConfig.dimension,
-              choice_a_type: sceneConfig.typeA,
-              choice_b_type: sceneConfig.typeB,
-              vote_deadline: deadline,
-            })
-            .select()
-            .single()
+          await supabase.from('novel_sessions').update({ full_text: newFullText, status: 'choice' }).eq('id', sessionId)
 
-          await supabase
-            .from('novel_sessions')
-            .update({ full_text: newFullText, status: 'choice' })
-            .eq('id', sessionId)
-
-          // ボットが存在する場合は自動投票
           if (sceneChoice) {
             const { data: allPlayers } = await supabase
-              .from('room_players')
-              .select('*, profiles(*)')
-              .eq('room_id', session.room_id)
-              .eq('is_active', true)
-
-            const bots = (allPlayers ?? []).filter(
-              (p: any) => p.profiles?.username?.startsWith('🤖')
-            )
-
+              .from('room_players').select('*, profiles(*)').eq('room_id', session.room_id).eq('is_active', true)
+            const bots = (allPlayers ?? []).filter((p: any) => p.profiles?.username?.startsWith('🤖'))
             for (const bot of bots) {
               await supabase.from('votes').insert({
-                scene_choice_id: sceneChoice.id,
-                room_id: session.room_id,
-                user_id: bot.user_id,
-                choice: Math.random() < 0.5 ? 'A' : 'B',
+                scene_choice_id: sceneChoice.id, room_id: session.room_id,
+                user_id: bot.user_id, choice: Math.random() < 0.5 ? 'A' : 'B',
               })
             }
-
             const humanCount = (allPlayers ?? []).length - bots.length
             if (humanCount === 0) {
               await tallyAndAdvance(supabase, sceneChoice.id, session.room_id)
@@ -156,6 +129,14 @@ export async function POST(request: NextRequest) {
           }
 
           send({ type: 'done', sceneChoiceId: sceneChoice?.id, deadline })
+        } else {
+          // OP / TEXT / SUMMARY
+          await supabase.from('scene_choices').insert({
+            novel_session_id: sessionId, scene_number: pageNumber, page_number: pageNumber,
+            story_segment: storyBuffer, choice_a: null, choice_b: null, vote_deadline: deadline,
+          })
+          await supabase.from('novel_sessions').update({ full_text: newFullText, status: 'reading' }).eq('id', sessionId)
+          send({ type: 'done', deadline })
         }
       } catch (err) {
         send({ type: 'error', message: String(err) })

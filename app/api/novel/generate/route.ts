@@ -1,23 +1,21 @@
-// ============================================================
-// app/api/novel/generate/route.ts
-//
-// 変更点は1箇所のみ：
-//   system: のハードコード文字列 → getSystemPrompt() に変更
-//
-// それ以外のロジックは元のファイルと完全に同一。
-// ============================================================
-
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { streamNovel } from '@/lib/novel/stream'
-import { buildStoryPrompt, getSystemPrompt } from '@/lib/claude/prompts'
-import { MBTI_SCENES } from '@/types'
+import { buildStoryPrompt, getSystemPrompt, type PageType } from '@/lib/claude/prompts'
 
 export const maxDuration = 60
 
+function getPageType(pageNumber: number): PageType {
+  if (pageNumber === 0)  return 'op'
+  if (pageNumber === 16) return 'ending'
+  if (pageNumber === 15) return 'summary'
+  if (pageNumber % 2 === 0 && pageNumber >= 2 && pageNumber <= 14) return 'choice'
+  return 'text'
+}
+
 export async function POST(request: NextRequest) {
   const supabase = createAdminClient()
-  const { sessionId, sceneNumber, previousChoiceText } = await request.json()
+  const { sessionId, pageNumber, previousChoiceText } = await request.json()
 
   const { data: session } = await supabase
     .from('novel_sessions')
@@ -27,18 +25,19 @@ export async function POST(request: NextRequest) {
 
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
 
-  const isLastScene = sceneNumber >= 3
+  const pageType = getPageType(pageNumber)
+
   const prompt = buildStoryPrompt({
     previousText: session.full_text,
-    sceneNumber,
-    isLastScene,
+    pageNumber,
+    pageType,
     previousChoiceText,
   })
 
   let fullText = ''
   try {
     fullText = await streamNovel({
-      system: getSystemPrompt(), // ← ここだけ変更（YAMLから読み込む）
+      system: getSystemPrompt(),
       user: prompt,
       maxTokens: 900,
       onChunk: () => {},
@@ -47,67 +46,123 @@ export async function POST(request: NextRequest) {
     const msg = String(err)
     if (msg.includes('429')) {
       return NextResponse.json(
-        { error: 'OpenAI APIのクレジットが不足しています。https://platform.openai.com/billing でチャージしてください。' },
+        { error: 'APIのクレジットが不足しています。' },
         { status: 500 }
       )
     }
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 
-  // ストーリー本文と選択肢を分離
+  // ストーリー本文を分離（=== より前）
   const delimIdx = fullText.indexOf('===')
   const storyText = delimIdx !== -1
     ? fullText.substring(0, delimIdx).trim()
     : fullText.trim()
 
   const newFullText = (session.full_text ? session.full_text + '\n\n' : '') + storyText
+  const deadline    = new Date(Date.now() + 60_000).toISOString()
 
-  if (isLastScene) {
+  // ── ED（ページ16）─────────────────────────────────────
+  if (pageType === 'ending') {
+    await supabase.from('scene_choices').insert({
+      novel_session_id: sessionId,
+      scene_number:     pageNumber,
+      page_number:      pageNumber,
+      story_segment:    storyText,
+      choice_a:         null,
+      choice_b:         null,
+      vote_deadline:    deadline,
+    })
+
     await supabase
       .from('novel_sessions')
       .update({ full_text: newFullText, status: 'completed' })
       .eq('id', sessionId)
+
     await supabase.from('rooms').update({ status: 'finished' }).eq('id', session.room_id)
+
     return NextResponse.json({ text: storyText, completed: true })
   }
 
-  // 選択肢パース
-  let parsedChoices = { choice_a: '前に進む', choice_b: '立ち止まって考える' }
-  const choicesIdx = fullText.indexOf('===CHOICES===')
-  if (choicesIdx !== -1) {
-    const jsonStr = fullText.substring(choicesIdx + 13).replace(/===END===/g, '').trim()
-    try {
-      parsedChoices = JSON.parse(jsonStr)
-    } catch { /* フォールバック使用 */ }
+  // ── CHOICEページ ──────────────────────────────────────
+  if (pageType === 'choice') {
+    let parsedChoices = { choice_a: '前に進む', choice_b: '立ち止まって考える' }
+    const choicesIdx = fullText.indexOf('===CHOICES===')
+    if (choicesIdx !== -1) {
+      const jsonStr = fullText.substring(choicesIdx + 13).replace(/===END===/g, '').trim()
+      try {
+        parsedChoices = JSON.parse(jsonStr)
+      } catch { /* フォールバック使用 */ }
+    }
+
+    const { data: sceneChoice } = await supabase
+      .from('scene_choices')
+      .insert({
+        novel_session_id: sessionId,
+        scene_number:     pageNumber,
+        page_number:      pageNumber,
+        story_segment:    storyText,
+        choice_a:         parsedChoices.choice_a,
+        choice_b:         parsedChoices.choice_b,
+        vote_deadline:    deadline,
+      })
+      .select()
+      .single()
+
+    await supabase
+      .from('novel_sessions')
+      .update({ full_text: newFullText, status: 'choice' })
+      .eq('id', sessionId)
+
+    return NextResponse.json({
+      text:          storyText,
+      choices:       { a: parsedChoices.choice_a, b: parsedChoices.choice_b },
+      sceneChoiceId: sceneChoice?.id,
+      deadline,
+    })
   }
 
-  const sceneConfig = MBTI_SCENES[sceneNumber]
+  // ── OP / TEXT / SUMMARY ──────────────────────────────
+  await supabase.from('scene_choices').insert({
+    novel_session_id: sessionId,
+    scene_number:     pageNumber,
+    page_number:      pageNumber,
+    story_segment:    storyText,
+    choice_a:         null,
+    choice_b:         null,
+    vote_deadline:    deadline,
+  })
 
-  const { data: sceneChoice } = await supabase
-    .from('scene_choices')
-    .insert({
-      novel_session_id: sessionId,
-      scene_number: sceneNumber,
-      story_segment: storyText,
-      choice_a: parsedChoices.choice_a,
-      choice_b: parsedChoices.choice_b,
-      mbti_dimension: sceneConfig.dimension,
-      choice_a_type: sceneConfig.typeA,
-      choice_b_type: sceneConfig.typeB,
-      vote_deadline: new Date(Date.now() + 10_000).toISOString(), // 投票フェーズ10秒
-    })
-    .select()
-    .single()
+  // ボットを自動 ready（ready_page = pageNumber）
+  const { data: allPlayers } = await supabase
+    .from('room_players')
+    .select('id, user_id')
+    .eq('room_id', session.room_id)
+    .eq('is_active', true)
+
+  const playerIds = (allPlayers ?? []).map((p: any) => p.user_id as string)
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, username')
+    .in('id', playerIds)
+
+  const botUserIds = (profiles ?? [])
+    .filter((p: any) => (p.username as string).startsWith('🤖'))
+    .map((p: any) => p.id as string)
+
+  for (const p of allPlayers ?? []) {
+    if (botUserIds.includes(p.user_id)) {
+      await supabase
+        .from('room_players')
+        .update({ ready_page: pageNumber })
+        .eq('id', p.id)
+    }
+  }
 
   await supabase
     .from('novel_sessions')
-    .update({ full_text: newFullText, status: 'choice' })
+    .update({ full_text: newFullText, status: 'reading' })
     .eq('id', sessionId)
 
-  return NextResponse.json({
-    text: storyText,
-    choices: { a: parsedChoices.choice_a, b: parsedChoices.choice_b },
-    sceneChoiceId: sceneChoice?.id,
-    // vote_deadline は DB に保存済み（投票フェーズで使用）
-  })
+  return NextResponse.json({ text: storyText, deadline })
 }
