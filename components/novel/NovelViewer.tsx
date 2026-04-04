@@ -14,11 +14,11 @@ interface Props {
 // このコンポーネントは受け取った text をそのまま表示するだけ。
 // ============================================================
 export default function NovelViewer({ text, isGenerating }: Props) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
 
-  // 自動スクロール
+  // テキストが切り替わったら先頭に戻す
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    topRef.current?.scrollIntoView({ behavior: "instant" });
   }, [text]);
 
   // 段落分割
@@ -113,17 +113,12 @@ export default function NovelViewer({ text, isGenerating }: Props) {
         <div className="nv-fade-top" aria-hidden />
 
         <div className="nv-body">
-          {paragraphs.map((para, i) => {
-            const isLast = i === paragraphs.length - 1;
-            return (
-              <p key={i} className="nv-para">
-                {para}
-
-              </p>
-            );
-          })}
-
-          <div ref={bottomRef} />
+          <div ref={topRef} />
+          {paragraphs.map((para, i) => (
+            <p key={i} className="nv-para">
+              {para}
+            </p>
+          ))}
         </div>
 
         <div className="nv-fade-bottom" aria-hidden />

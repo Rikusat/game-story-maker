@@ -63,64 +63,195 @@ export default function LobbyPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center px-4">
-      <h1 className="text-4xl font-bold text-indigo-300 mb-2">📖</h1>
-      <h2 className="text-3xl font-bold text-gray-100 mb-2">Game Story Maker</h2>
-      <p className="text-gray-400 mb-10 text-center">
-        みんなで選ぶ、ひとつの物語
-      </p>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;500&display=swap');
 
-      <div className="w-full max-w-sm flex flex-col gap-4">
-        <button
-          onClick={() => handleCreate(false)}
-          disabled={!!loading}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl text-lg transition-colors disabled:opacity-50"
-        >
-          {loading === "create" ? "作成中…" : "✦ ルームを作る（フレンドと）"}
-        </button>
+        .lb-root {
+          min-height: 100vh;
+          background: #faf8f4;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 2rem 1.5rem;
+          font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', serif;
+          position: relative;
+        }
+        .lb-texture {
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          background-image: radial-gradient(circle, rgba(60,40,20,0.025) 1px, transparent 1px);
+          background-size: 24px 24px;
+        }
+        .lb-content {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          max-width: 340px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+        .lb-title {
+          font-size: clamp(1.7rem, 7vw, 2.2rem);
+          font-weight: 400;
+          color: #1a1208;
+          letter-spacing: 0.2em;
+          margin-bottom: 0.6rem;
+          text-align: center;
+        }
+        .lb-divider {
+          width: 40px;
+          height: 1px;
+          background: rgba(60,40,20,0.3);
+          margin: 0 auto 0.8rem;
+        }
+        .lb-subtitle {
+          font-size: 0.82rem;
+          font-weight: 300;
+          color: #8a6e50;
+          letter-spacing: 0.15em;
+          margin-bottom: 3rem;
+          text-align: center;
+        }
+        .lb-btn {
+          width: 100%;
+          padding: 1rem 1.25rem;
+          border-radius: 3px;
+          font-family: 'Noto Serif JP', serif;
+          font-size: 0.95rem;
+          font-weight: 400;
+          letter-spacing: 0.1em;
+          cursor: pointer;
+          transition: background 0.2s, opacity 0.2s;
+          margin-bottom: 0.75rem;
+        }
+        .lb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .lb-btn-primary {
+          background: #2e1e0f;
+          color: #f5efe4;
+          border: none;
+        }
+        .lb-btn-primary:hover:not(:disabled) { background: #1e1208; }
+        .lb-btn-secondary {
+          background: transparent;
+          color: #3d2b1a;
+          border: 1px solid rgba(60,40,20,0.3);
+        }
+        .lb-btn-secondary:hover:not(:disabled) { background: rgba(60,40,20,0.06); }
+        .lb-sep {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          width: 100%;
+          margin: 0.25rem 0 1rem;
+        }
+        .lb-sep-line { flex: 1; height: 1px; background: rgba(60,40,20,0.15); }
+        .lb-sep-text { font-size: 0.75rem; color: #a08060; letter-spacing: 0.1em; }
+        .lb-join-row { display: flex; gap: 0.5rem; width: 100%; }
+        .lb-input {
+          flex: 1;
+          background: #f0ebe0;
+          border: 1px solid rgba(60,40,20,0.2);
+          border-radius: 3px;
+          padding: 0.75rem 1rem;
+          font-family: 'Noto Serif JP', serif;
+          font-size: 0.95rem;
+          color: #1a1208;
+          outline: none;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          transition: border-color 0.15s;
+        }
+        .lb-input:focus { border-color: rgba(60,40,20,0.5); }
+        .lb-input::placeholder { color: #b09878; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: none; }
+        .lb-join-btn {
+          background: #f0ebe0;
+          border: 1px solid rgba(60,40,20,0.2);
+          border-radius: 3px;
+          padding: 0.75rem 1.1rem;
+          font-family: 'Noto Serif JP', serif;
+          font-size: 0.9rem;
+          color: #3d2b1a;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .lb-join-btn:hover:not(:disabled) { background: #e5ddd0; }
+        .lb-join-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .lb-error { color: #8a2e20; font-size: 0.82rem; text-align: center; margin-top: 0.6rem; }
+        .lb-link {
+          background: none;
+          border: none;
+          color: #8a6e50;
+          font-family: 'Noto Serif JP', serif;
+          font-size: 0.8rem;
+          cursor: pointer;
+          letter-spacing: 0.1em;
+          margin-top: 2rem;
+          transition: color 0.2s;
+        }
+        .lb-link:hover { color: #1a1208; }
+      `}</style>
 
-        <button
-          onClick={() => handleCreate(true)}
-          disabled={!!loading}
-          className="bg-purple-700 hover:bg-purple-600 text-white font-bold py-4 rounded-xl text-lg transition-colors disabled:opacity-50"
-        >
-          {loading === "solo" ? "準備中…" : "🤖 ボットと1人で遊ぶ"}
-        </button>
+      <div className="lb-texture" aria-hidden />
 
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-gray-700" />
-          <span className="text-gray-500 text-sm">または</span>
-          <div className="flex-1 h-px bg-gray-700" />
-        </div>
+      <div className="lb-root">
+        <div className="lb-content">
+          <h1 className="lb-title">一期一会ノベル</h1>
+          <div className="lb-divider" />
+          <p className="lb-subtitle">みんなで選ぶ、ひとつの物語</p>
 
-        <form onSubmit={handleJoin} className="flex gap-2">
-          <input
-            type="text"
-            placeholder="ルームコード（6桁）"
-            value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-            maxLength={6}
-            required
-            className="flex-1 bg-gray-800 text-gray-100 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500 uppercase tracking-widest"
-          />
           <button
-            type="submit"
-            disabled={!!loading || joinCode.length < 6}
-            className="bg-gray-700 hover:bg-gray-600 text-gray-100 font-bold px-5 rounded-xl transition-colors disabled:opacity-50"
+            onClick={() => handleCreate(false)}
+            disabled={!!loading}
+            className="lb-btn lb-btn-primary"
           >
-            {loading === "join" ? "…" : "参加"}
+            {loading === "create" ? "作成中…" : "ルームを作る（フレンドと）"}
           </button>
-        </form>
 
-        {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+          <button
+            onClick={() => handleCreate(true)}
+            disabled={!!loading}
+            className="lb-btn lb-btn-secondary"
+          >
+            {loading === "solo" ? "準備中…" : "ひとりで読む"}
+          </button>
 
-        <button
-          onClick={() => router.push("/bookshelf")}
-          className="text-gray-400 hover:text-gray-200 text-sm text-center mt-2"
-        >
-          📚 保存した物語を見る
-        </button>
+          <div className="lb-sep">
+            <div className="lb-sep-line" />
+            <span className="lb-sep-text">または</span>
+            <div className="lb-sep-line" />
+          </div>
+
+          <form onSubmit={handleJoin} className="lb-join-row">
+            <input
+              type="text"
+              placeholder="ルームコード（6桁）"
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              maxLength={6}
+              required
+              className="lb-input"
+            />
+            <button
+              type="submit"
+              disabled={!!loading || joinCode.length < 6}
+              className="lb-join-btn"
+            >
+              {loading === "join" ? "…" : "参加"}
+            </button>
+          </form>
+
+          {error && <p className="lb-error">{error}</p>}
+
+          <button onClick={() => router.push("/bookshelf")} className="lb-link">
+            保存した物語を見る
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
