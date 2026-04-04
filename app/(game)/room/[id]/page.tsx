@@ -139,9 +139,14 @@ export default function RoomPage() {
               supabase.removeChannel(realtimeChannelRef.current);
               realtimeChannelRef.current = null;
             }
-            // ゲーム開始：セッション取得→ゲームフロー
-            const { data: session } = await supabase
-              .from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle();
+            // セッション取得（サーバー側の書き込み遅延に備えてリトライ）
+            let session = null;
+            for (let i = 0; i < 6; i++) {
+              const { data } = await supabase
+                .from("novel_sessions").select("*").eq("room_id", roomId).maybeSingle();
+              if (data) { session = data; break; }
+              await new Promise((r) => setTimeout(r, 400));
+            }
             if (!session) { setError("セッションが見つかりません"); return; }
             sessionIdRef.current   = session.id;
             const page             = session.current_page ?? 0;
@@ -787,10 +792,12 @@ export default function RoomPage() {
       <div className="rp-root">
         {/* ヘッダー */}
         <header className="rp-header">
+          {humanCount > 1 && (
           <div>
             <p className="rp-code-hint">合言葉</p>
             <p className="rp-code">{roomCode || "…"}</p>
           </div>
+          )}
           <div>
             <p className="rp-scene-hint">ページ</p>
             <p className="rp-scene">{currentPage} / 16</p>
@@ -816,8 +823,12 @@ export default function RoomPage() {
         {/* ロビー */}
         {phase === "lobby" && (
           <main className="rp-main" style={{ alignItems: "center", justifyContent: "center", display: "flex", flexDirection: "column", gap: 24, padding: "40px 24px" }}>
-            <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.72rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.14em" }}>合言葉</p>
-            <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "2.4rem", fontWeight: 500, letterSpacing: "0.3em", color: "rgba(26,22,18,0.8)" }}>{roomCode}</p>
+            {humanCount > 1 && (
+              <>
+                <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.72rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.14em" }}>合言葉</p>
+                <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "2.4rem", fontWeight: 500, letterSpacing: "0.3em", color: "rgba(26,22,18,0.8)" }}>{roomCode}</p>
+              </>
+            )}
             <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.78rem", color: "rgba(26,22,18,0.4)", letterSpacing: "0.1em" }}>
               参加者 {totalPlayers} 人
             </p>

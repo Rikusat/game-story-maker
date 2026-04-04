@@ -89,24 +89,26 @@ export async function POST(request: NextRequest) {
     if (!room || room.host_id !== userId)
       return NextResponse.json({ error: "権限がありません" }, { status: 403 });
 
-    await supabase.from("rooms").update({ status: "playing" }).eq("id", roomId);
-
-    // ボットモードで既にセッションが存在する場合は再利用する
+    // セッションを先に作成してからroomsを更新する
+    // （rooms UPDATE のRealtimeイベント発火前にセッションを存在させるため）
     const { data: existingSession } = await supabase
       .from("novel_sessions")
       .select("*")
       .eq("room_id", roomId)
       .maybeSingle();
 
-    if (existingSession) {
-      return NextResponse.json({ session: existingSession });
+    let session = existingSession;
+    if (!session) {
+      const { data: newSession } = await supabase
+        .from("novel_sessions")
+        .insert({ room_id: roomId, status: "generating", current_page: 0 })
+        .select()
+        .single();
+      session = newSession;
     }
 
-    const { data: session } = await supabase
-      .from("novel_sessions")
-      .insert({ room_id: roomId, status: "generating", current_page: 0 })
-      .select()
-      .single();
+    // セッション作成後にroomsを更新（ここでRealtimeが発火する）
+    await supabase.from("rooms").update({ status: "playing" }).eq("id", roomId);
 
     return NextResponse.json({ session });
   }

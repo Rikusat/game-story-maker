@@ -182,18 +182,6 @@ export default function LobbyPage() {
         .lb-join-btn:hover:not(:disabled) { background: #e5ddd0; }
         .lb-join-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .lb-error { color: #8a2e20; font-size: 0.82rem; text-align: center; margin-top: 0.6rem; }
-        .lb-link {
-          background: none;
-          border: none;
-          color: #8a6e50;
-          font-family: 'Noto Serif JP', serif;
-          font-size: 0.8rem;
-          cursor: pointer;
-          letter-spacing: 0.1em;
-          margin-top: 2rem;
-          transition: color 0.2s;
-        }
-        .lb-link:hover { color: #1a1208; }
       `}</style>
 
       <div className="lb-texture" aria-hidden />
@@ -246,10 +234,6 @@ export default function LobbyPage() {
           </form>
 
           {error && <p className="lb-error">{error}</p>}
-
-          <button onClick={() => router.push("/bookshelf")} className="lb-link">
-            保存した物語を見る
-          </button>
         </div>
       </div>
     </>
