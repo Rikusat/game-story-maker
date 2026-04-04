@@ -20,22 +20,31 @@ export default function ChoicePanel({
 }: Props) {
   const [seconds, setSeconds] = useState(60);
   const [visible, setVisible] = useState(false);
+  // マウント直後はタイムアウトを発火させない（deadline超過済みでも即ページ進行しないための猶予）
+  const [canTimeout, setCanTimeout] = useState(false);
 
-  // ── タイマー（既存ロジック維持） ──
+  useEffect(() => {
+    const t = setTimeout(() => setCanTimeout(true), 5000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ── タイマー ──
   useEffect(() => {
     if (!choice.vote_deadline) return;
+    // パネルを開いた時点から最低60秒は選択できるよう、ローカル期限を延長
+    const mountDeadline = Date.now() + 60_000;
+    const serverDeadline = new Date(choice.vote_deadline!).getTime();
+    const effectiveDeadline = Math.max(serverDeadline, mountDeadline);
+
     const update = () => {
-      const rem = Math.max(
-        0,
-        Math.ceil((new Date(choice.vote_deadline!).getTime() - Date.now()) / 1000)
-      );
-      setSeconds(rem);
-      if (rem === 0 && isHost) onTimeUp();
+      const rem = Math.max(0, Math.ceil((effectiveDeadline - Date.now()) / 1000));
+      setSeconds(Math.min(rem, 60));
+      if (rem === 0 && isHost && canTimeout) onTimeUp();
     };
     update();
     const t = setInterval(update, 500);
     return () => clearInterval(t);
-  }, [choice.vote_deadline, isHost]);
+  }, [choice.vote_deadline, isHost, canTimeout]);
 
   // ── 巻物展開アニメ ──
   useEffect(() => {
