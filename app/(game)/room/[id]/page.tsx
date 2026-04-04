@@ -876,7 +876,13 @@ export default function RoomPage() {
             phase === "waiting" ||
             phase === "ending") &&
             displayText && (
-              <NovelViewer text={displayText} isGenerating={false} />
+              <>
+                <NovelViewer text={displayText} isGenerating={false} />
+                {/* ChoicePanel（固定表示）の高さ分だけ余白を確保して文章が隠れないようにする */}
+                {pageType === "choice" && (
+                  <div style={{ height: "280px", flexShrink: 0 }} aria-hidden />
+                )}
+              </>
             )}
 
           {/* 投票待ち表示（CHOICEページ投票後） */}
