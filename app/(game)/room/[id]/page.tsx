@@ -40,6 +40,7 @@ export default function RoomPage() {
   const [roomCode, setRoomCode]       = useState("");
   const [isSoloMode, setIsSoloMode]   = useState(false);
   const [error, setError]             = useState("");
+  const [startLoading, setStartLoading] = useState(false);
   const [showChoicePanel, setShowChoicePanel] = useState(false);
 
   const sessionIdRef       = useRef("");
@@ -136,7 +137,10 @@ export default function RoomPage() {
         { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
         async (payload) => {
           if (payload.new.status === "playing") {
-            // ロビー用チャンネルを切断してゲーム開始
+            // HOSTはhandleStartGameで処理済みのためスキップ
+            if (isHostRef.current) return;
+
+            // GUEST: Realtimeでゲーム開始
             if (realtimeChannelRef.current) {
               supabase.removeChannel(realtimeChannelRef.current);
               realtimeChannelRef.current = null;
@@ -154,7 +158,7 @@ export default function RoomPage() {
             const page             = session.current_page ?? 0;
             currentPageRef.current = page;
             setCurrentPage(page);
-            // ゲーム開始時点の最新プレイヤー数を確定させる
+            // 最新プレイヤー数を確定
             const { data: latestPlayers } = await supabase
               .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
             const humanPlayers = (latestPlayers ?? []).filter((p: any) => !p.is_bot);
@@ -185,15 +189,45 @@ export default function RoomPage() {
 
   // ── ゲーム開始（ホストのみ）─────────────────────────────
   const handleStartGame = async () => {
-    const userId = userIdRef.current;
-    const res = await fetch("/api/match", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", roomId, userId }),
-    });
-    const data = await res.json();
-    if (data.error) setError(data.error);
-    // Realtime が rooms UPDATE を検知して init() を再実行
+    setError("");
+    setStartLoading(true);
+    try {
+      const res = await fetch("/api/match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", roomId, userId: userIdRef.current }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error); return; }
+
+      // HOSTはAPIレスポンスから直接ゲーム開始（Realtimeを待たない）
+      const session = data.session;
+      if (!session) { setError("セッションが見つかりません"); return; }
+
+      // ロビー用チャンネルを切断
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+
+      // 最新プレイヤー数を確定
+      const { data: latestPlayers } = await supabase
+        .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
+      const humanPlayers = (latestPlayers ?? []).filter((p: any) => !p.is_bot);
+      humanCountRef.current = humanPlayers.length;
+      setHumanCount(humanPlayers.length);
+
+      sessionIdRef.current   = session.id;
+      const page             = session.current_page ?? 0;
+      currentPageRef.current = page;
+      setCurrentPage(page);
+      await loadPageContent(session.id, page, session.status ?? "generating");
+      if (page < 16) subscribeRealtime(session.id);
+    } catch (e: any) {
+      setError(e.message ?? "ゲームの開始に失敗しました");
+    } finally {
+      setStartLoading(false);
+    }
   };
 
   // ── ページコンテンツ取得 ─────────────────────────────────
@@ -848,21 +882,22 @@ export default function RoomPage() {
             {isHostRef.current ? (
               <button
                 onClick={handleStartGame}
+                disabled={startLoading}
                 style={{
                   marginTop: 16,
                   fontFamily: "'Shippori Mincho', serif",
                   fontSize: "0.9rem",
                   fontWeight: 500,
                   letterSpacing: "0.18em",
-                  color: "rgba(26,22,18,0.85)",
+                  color: startLoading ? "rgba(26,22,18,0.35)" : "rgba(26,22,18,0.85)",
                   background: "#faf8f4",
                   border: "1px solid rgba(26,22,18,0.3)",
                   borderRadius: "100px",
                   padding: "12px 32px",
-                  cursor: "pointer",
+                  cursor: startLoading ? "not-allowed" : "pointer",
                 }}
               >
-                ゲームを始める
+                {startLoading ? "開始中…" : "ゲームを始める"}
               </button>
             ) : (
               <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.8rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.12em" }}>
