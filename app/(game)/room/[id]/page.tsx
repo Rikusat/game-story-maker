@@ -154,6 +154,12 @@ export default function RoomPage() {
             const page             = session.current_page ?? 0;
             currentPageRef.current = page;
             setCurrentPage(page);
+            // ゲーム開始時点の最新プレイヤー数を確定させる
+            const { data: latestPlayers } = await supabase
+              .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
+            const humanPlayers = (latestPlayers ?? []).filter((p: any) => !p.is_bot);
+            humanCountRef.current = humanPlayers.length;
+            setHumanCount(humanPlayers.length);
             await loadPageContent(session.id, page, session.status ?? "generating");
             if (page < 16) subscribeRealtime(session.id);
           }
@@ -165,7 +171,12 @@ export default function RoomPage() {
         async () => {
           const { data: players } = await supabase
             .from("room_players").select("*").eq("room_id", roomId).eq("is_active", true);
-          setTotalPlayers((players ?? []).length);
+          const allPlayers = players ?? [];
+          setTotalPlayers(allPlayers.length);
+          // ゲーム開始前にhuman countを正確に更新する
+          const humanPlayers = allPlayers.filter((p: any) => !p.is_bot);
+          humanCountRef.current = humanPlayers.length;
+          setHumanCount(humanPlayers.length);
         }
       )
       .subscribe();
@@ -438,7 +449,7 @@ export default function RoomPage() {
     const nextPage   = pageNumber + 1;
 
     // ── 1人プレイ（ボットモード）：待機なしで即座に進む ──
-    if (humanCountRef.current <= 1) {
+    if (isSoloMode) {
       currentPageRef.current = nextPage;
       setCurrentPage(nextPage);
       setMyVote(null);
@@ -548,7 +559,7 @@ export default function RoomPage() {
       const data = await res.json();
 
       // ソロモード: APIレスポンスで即座にページ進行（Realtimeを待たない）
-      if (humanCountRef.current <= 1 && data.nextPage > currentPageRef.current) {
+      if (isSoloMode && data.nextPage > currentPageRef.current) {
         const nextPage = data.nextPage as number;
         currentPageRef.current = nextPage;
         setCurrentPage(nextPage);
