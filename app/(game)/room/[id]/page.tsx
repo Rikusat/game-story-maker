@@ -38,6 +38,7 @@ export default function RoomPage() {
   const [totalPlayers, setTotalPlayers]   = useState(1);
   const [humanCount, setHumanCount]       = useState(1);
   const [roomCode, setRoomCode]       = useState("");
+  const [isSoloMode, setIsSoloMode]   = useState(false);
   const [error, setError]             = useState("");
   const [showChoicePanel, setShowChoicePanel] = useState(false);
 
@@ -71,6 +72,7 @@ export default function RoomPage() {
 
     // localStorage でソロモード（ボットと遊ぶ）かどうかを確認
     const isSoloMode = localStorage.getItem(`soloMode_${roomId}`) === "1";
+    setIsSoloMode(isSoloMode);
     if (isSoloMode) {
       humanCountRef.current = 1;
       setHumanCount(1);
@@ -792,7 +794,7 @@ export default function RoomPage() {
       <div className="rp-root">
         {/* ヘッダー */}
         <header className="rp-header">
-          {humanCount > 1 && (
+          {!isSoloMode && (
           <div>
             <p className="rp-code-hint">合言葉</p>
             <p className="rp-code">{roomCode || "…"}</p>
@@ -823,7 +825,7 @@ export default function RoomPage() {
         {/* ロビー */}
         {phase === "lobby" && (
           <main className="rp-main" style={{ alignItems: "center", justifyContent: "center", display: "flex", flexDirection: "column", gap: 24, padding: "40px 24px" }}>
-            {humanCount > 1 && (
+            {!isSoloMode && (
               <>
                 <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "0.72rem", color: "rgba(26,22,18,0.35)", letterSpacing: "0.14em" }}>合言葉</p>
                 <p style={{ fontFamily: "'Shippori Mincho', serif", fontSize: "2.4rem", fontWeight: 500, letterSpacing: "0.3em", color: "rgba(26,22,18,0.8)" }}>{roomCode}</p>
@@ -960,7 +962,7 @@ export default function RoomPage() {
               >
                 {myReady ? `待機中… (${readyCount}/${humanCount})` : "次へ →"}
               </button>
-              {deadline && humanCount > 1 && (
+              {deadline && !isSoloMode && (
                 <CountdownBar
                   deadline={deadline}
                   onTimeout={handleTextTimeout}
