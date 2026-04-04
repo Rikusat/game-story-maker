@@ -12,11 +12,12 @@ interface Props {
   onVote: (v: VoteChoice) => void;
   onTimeUp: () => void;
   isHost: boolean;
+  isSolo?: boolean;
 }
 
 export default function ChoicePanel({
   choice, myVote, countA, countB, totalPlayers,
-  onVote, onTimeUp, isHost,
+  onVote, onTimeUp, isHost, isSolo = false,
 }: Props) {
   const [seconds, setSeconds] = useState(60);
   const [visible, setVisible] = useState(false);
@@ -39,7 +40,7 @@ export default function ChoicePanel({
     const update = () => {
       const rem = Math.max(0, Math.ceil((effectiveDeadline - Date.now()) / 1000));
       setSeconds(Math.min(rem, 60));
-      if (rem === 0 && isHost && canTimeout) onTimeUp();
+      if (rem === 0 && isHost && canTimeout && !isSolo) onTimeUp();
     };
     update();
     const t = setInterval(update, 500);
@@ -248,25 +249,27 @@ export default function ChoicePanel({
         </div>
 
         <div className="cp-inner">
-          {/* ヘッダー（タイマーゲージのみ） */}
-          <div className="cp-header">
-            <div className="cp-timer-wrap" aria-label={`残り${seconds}秒`}>
-              <svg width="50" height="50" viewBox="0 0 50 50" aria-hidden>
-                <circle cx="25" cy="25" r={RADIUS}
-                  fill="none" stroke="rgba(26,22,18,0.07)" strokeWidth="2" />
-                <circle cx="25" cy="25" r={RADIUS}
-                  fill="none"
-                  stroke={isUrgent ? "#b03020" : "rgba(26,22,18,0.4)"}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeDasharray={CIRC}
-                  strokeDashoffset={dashOffset}
-                  transform="rotate(-90 25 25)"
-                  style={{ transition: "stroke-dashoffset 1s linear, stroke 0.3s" }}
-                />
-              </svg>
+          {/* ヘッダー（タイマーゲージ：ソロモードは非表示） */}
+          {!isSolo && (
+            <div className="cp-header">
+              <div className="cp-timer-wrap" aria-label={`残り${seconds}秒`}>
+                <svg width="50" height="50" viewBox="0 0 50 50" aria-hidden>
+                  <circle cx="25" cy="25" r={RADIUS}
+                    fill="none" stroke="rgba(26,22,18,0.07)" strokeWidth="2" />
+                  <circle cx="25" cy="25" r={RADIUS}
+                    fill="none"
+                    stroke={isUrgent ? "#b03020" : "rgba(26,22,18,0.4)"}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeDasharray={CIRC}
+                    strokeDashoffset={dashOffset}
+                    transform="rotate(-90 25 25)"
+                    style={{ transition: "stroke-dashoffset 1s linear, stroke 0.3s" }}
+                  />
+                </svg>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* 選択肢 */}
           <div className="cp-choices">

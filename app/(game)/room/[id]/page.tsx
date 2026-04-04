@@ -931,6 +931,7 @@ export default function RoomPage() {
                 onVote={handleVote}
                 onTimeUp={handleVoteTimeout}
                 isHost={isHostRef.current}
+                isSolo={humanCount <= 1}
               />
             )}
           </>
@@ -948,7 +949,7 @@ export default function RoomPage() {
               >
                 {myReady ? `待機中… (${readyCount}/${humanCount})` : "次へ →"}
               </button>
-              {deadline && (
+              {deadline && humanCount > 1 && (
                 <CountdownBar
                   deadline={deadline}
                   onTimeout={handleTextTimeout}
