@@ -300,22 +300,37 @@ export default function RoomPage() {
         }),
       });
 
+      // !res.ok 時はボディを安全に読む（SSEデータが来てもJSONパースエラーにしない）
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "生成に失敗しました");
+        let errMsg = `生成に失敗しました (HTTP ${res.status})`;
+        try {
+          const body = await res.text();
+          const parsed = JSON.parse(body);
+          if (typeof parsed?.error === "string") errMsg = parsed.error;
+        } catch { /* JSONでないレスポンスは無視 */ }
+        throw new Error(errMsg);
       }
 
+      if (!res.body) throw new Error("ストリームが取得できませんでした");
+
       // SSEストリームを逐次読み込む（スピナーなしで即テキスト表示）
-      const reader = res.body!.getReader();
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let sseBuffer = "";
       let accText = "";
       let streamingStarted = false;
 
-      const processEvent = (event: any) => {
+      const processBlock = (block: string) => {
+        if (!block.startsWith("data: ")) return;
+        let event: any;
+        try {
+          event = JSON.parse(block.slice(6).trim());
+        } catch {
+          return; // 不完全なJSONはスキップ
+        }
+
         if (event.type === "chunk") {
-          accText += event.text;
-          // === 以降は選択肢JSONなので表示しない
+          accText += event.text ?? "";
           const delimIdx = accText.indexOf("===");
           const visible = delimIdx !== -1 ? accText.substring(0, delimIdx).trim() : accText;
           setDisplayText(visible);
@@ -361,25 +376,24 @@ export default function RoomPage() {
         }
       };
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
+      const flushBuffer = () => {
         const blocks = sseBuffer.split("\n\n");
         sseBuffer = blocks.pop() ?? "";
+        for (const block of blocks) processBlock(block);
+      };
 
-        for (const block of blocks) {
-          if (!block.startsWith("data: ")) continue;
-          let event: any;
-          try {
-            event = JSON.parse(block.slice(6).trim());
-          } catch {
-            continue; // 不完全なJSONはスキップ
-          }
-          processEvent(event); // エラーイベント由来のthrowは外側のcatchへ
+      while (true) {
+        const { done, value } = await reader.read();
+        // value が存在する場合は done でも処理する（最終チャンクの取りこぼし防止）
+        if (value) {
+          sseBuffer += decoder.decode(value, { stream: !done });
+          flushBuffer();
         }
+        if (done) break;
       }
+      // デコーダ内部バッファと残余 sseBuffer を最終フラッシュ
+      sseBuffer += decoder.decode();
+      flushBuffer();
     } catch (err: any) {
       generatingPageRef.current = null;
       setError(err.message ?? "エラーが発生しました");
