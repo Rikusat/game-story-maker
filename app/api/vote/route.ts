@@ -72,13 +72,14 @@ export async function POST(request: NextRequest) {
   const botIds   = (allPlayers ?? []).filter((p: any) => p.is_bot).map((p: any) => p.user_id as string);
   const humanIds = (allPlayers ?? []).filter((p: any) => !p.is_bot).map((p: any) => p.user_id as string);
 
-  for (const botId of botIds) {
-    const botChoice = Math.random() < 0.5 ? "A" : "B";
-    await supabase.from("votes").upsert(
-      { scene_choice_id: sceneChoiceId, room_id: roomId, user_id: botId, choice: botChoice },
-      { onConflict: "scene_choice_id,user_id" }
-    );
-  }
+  await Promise.all(
+    botIds.map((botId) =>
+      supabase.from("votes").upsert(
+        { scene_choice_id: sceneChoiceId, room_id: roomId, user_id: botId, choice: Math.random() < 0.5 ? "A" : "B" },
+        { onConflict: "scene_choice_id,user_id" }
+      )
+    )
+  );
 
   // 人間プレイヤー全員が投票済みか確認
   const { data: votes } = await supabase

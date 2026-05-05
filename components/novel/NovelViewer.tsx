@@ -15,13 +15,15 @@ interface Props {
 // ============================================================
 export default function NovelViewer({ text, isGenerating }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevTextRef = useRef("");
 
-  // テキストが切り替わったらスクロールコンテナを先頭に戻す
+  // テキストが空→非空になったとき（新ページ）だけスクロールを先頭に戻す
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
+    if (prevTextRef.current === "" && text !== "") {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      window.scrollTo(0, 0);
     }
-    window.scrollTo(0, 0);
+    prevTextRef.current = text;
   }, [text]);
 
   // 段落分割

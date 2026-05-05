@@ -289,32 +289,14 @@ export default function RoomPage() {
     setVoteCountA(0);
     setVoteCountB(0);
 
-    // 直前の選択肢テキストを取得
-    let previousChoiceText = "";
     try {
-      const { data: prevChoices } = await supabase
-        .from("scene_choices")
-        .select("*")
-        .eq("novel_session_id", sessionIdRef.current)
-        .not("winning_choice", "is", null)
-        .lt("page_number", pageNumber)
-        .order("page_number", { ascending: false })
-        .limit(1);
-      if (prevChoices && prevChoices.length > 0) {
-        const prev = prevChoices[0];
-        previousChoiceText = prev.winning_choice === "A"
-          ? (prev.choice_a ?? "") : (prev.choice_b ?? "");
-      }
-    } catch { /* 無視 */ }
-
-    try {
+      // previousChoiceText はサーバー側で並列取得するためクライアント事前クエリ不要
       const res = await fetch("/api/novel/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           pageNumber,
-          previousChoiceText,
         }),
       });
 
@@ -323,41 +305,81 @@ export default function RoomPage() {
         throw new Error(err.error ?? "生成に失敗しました");
       }
 
-      const data = await res.json();
+      // SSEストリームを逐次読み込む（スピナーなしで即テキスト表示）
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
+      let accText = "";
+      let streamingStarted = false;
 
-      setDisplayText(data.text ?? "");
+      const processEvent = (event: any) => {
+        if (event.type === "chunk") {
+          accText += event.text;
+          // === 以降は選択肢JSONなので表示しない
+          const delimIdx = accText.indexOf("===");
+          const visible = delimIdx !== -1 ? accText.substring(0, delimIdx).trim() : accText;
+          setDisplayText(visible);
+          if (!streamingStarted && visible) {
+            streamingStarted = true;
+            setPhase("reading");
+          }
+        } else if (event.type === "done") {
+          const delimIdx = accText.indexOf("===");
+          const finalText = delimIdx !== -1
+            ? accText.substring(0, delimIdx).trim()
+            : accText.trim();
+          setDisplayText(finalText);
 
-      if (data.completed) {
-        // ページ16（ED）
-        setDeadline("");
-        setPhase("ending");
-        // Realtimeは session update イベントで切断
-        return;
+          if (event.completed) {
+            setDeadline("");
+            setPhase("ending");
+          } else if (event.choices) {
+            // CHOICEページ
+            const sc: SceneChoice = {
+              id:               event.sceneChoiceId ?? "",
+              novel_session_id: sessionIdRef.current,
+              scene_number:     pageNumber,
+              page_number:      pageNumber,
+              story_segment:    finalText,
+              choice_a:         event.choices.a,
+              choice_b:         event.choices.b,
+              vote_deadline:    event.deadline ?? "",
+              winning_choice:   null,
+              created_at:       new Date().toISOString(),
+            };
+            setSceneChoice(sc);
+            sceneChoiceIdRef.current = sc.id;
+            setDeadline(event.deadline ?? "");
+            if (!streamingStarted) setPhase("reading");
+          } else {
+            // TEXTページ
+            setDeadline(event.deadline ?? new Date(Date.now() + 60_000).toISOString());
+            if (!streamingStarted) setPhase("reading");
+          }
+        } else if (event.type === "error") {
+          throw new Error(event.error ?? "生成に失敗しました");
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const blocks = sseBuffer.split("\n\n");
+        sseBuffer = blocks.pop() ?? "";
+
+        for (const block of blocks) {
+          if (!block.startsWith("data: ")) continue;
+          let event: any;
+          try {
+            event = JSON.parse(block.slice(6).trim());
+          } catch {
+            continue; // 不完全なJSONはスキップ
+          }
+          processEvent(event); // エラーイベント由来のthrowは外側のcatchへ
+        }
       }
-
-      if (data.choices) {
-        // CHOICEページ
-        const sc: SceneChoice = {
-          id:                data.sceneChoiceId ?? "",
-          novel_session_id:  sessionIdRef.current,
-          scene_number:      pageNumber,
-          page_number:       pageNumber,
-          story_segment:     data.text ?? "",
-          choice_a:          data.choices.a,
-          choice_b:          data.choices.b,
-          vote_deadline:     data.deadline ?? "",
-          winning_choice:    null,
-          created_at:        new Date().toISOString(),
-        };
-        setSceneChoice(sc);
-        sceneChoiceIdRef.current = sc.id;
-        setDeadline(data.deadline ?? "");
-      } else {
-        // TEXTページ
-        setDeadline(data.deadline ?? new Date(Date.now() + 60_000).toISOString());
-      }
-
-      setPhase("reading");
     } catch (err: any) {
       generatingPageRef.current = null;
       setError(err.message ?? "エラーが発生しました");

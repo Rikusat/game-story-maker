@@ -47,6 +47,17 @@ export function getSystemPrompt(): string {
   )
 }
 
+// ── コンテキスト圧縮 ──────────────────────────────────────
+// 後半ページで full_text が膨らみ OpenAI 入力トークンが増えるのを防ぐ。
+// 導入部（世界観・キャラ確立）の先頭 500 文字 + 直近 2000 文字だけを渡す。
+function compressContext(text: string): string {
+  const MAX = 2500
+  if (!text || text.length <= MAX) return text
+  const head = text.substring(0, 500)
+  const tail = text.substring(text.length - 2000)
+  return `${head}\n\n[……中略……]\n\n${tail}`
+}
+
 // ── メイン ────────────────────────────────────────────────
 export function buildStoryPrompt({
   previousText,
@@ -67,10 +78,11 @@ export function buildStoryPrompt({
       ? insts.map(i => `・${str(i)}`).join('\n')
       : '・プレイヤーの選択の積み重ねが意味を持つ締めくくりにする\n・マークダウン記法（**や##など）は使わないでください\n・最後は「了」で終える'
 
+    const ctx = compressContext(previousText)
     return `${persona}
 
 【これまでの物語】
-${previousText || '（物語の始まり）'}
+${ctx || '（物語の始まり）'}
 
 【直前の選択】${previousChoiceText || 'なし'}
 
@@ -86,10 +98,11 @@ ${instText}
 
   // ── まとめ（ページ15） ────────────────────────────────
   if (pageType === 'summary') {
+    const ctx = compressContext(previousText)
     return `${persona}
 
 【これまでの物語】
-${previousText || '（まだ何も起きていない）'}
+${ctx || '（まだ何も起きていない）'}
 
 【直前の選択】${previousChoiceText || 'なし'}
 
@@ -114,11 +127,12 @@ ${previousText || '（まだ何も起きていない）'}
 
     const cc       = obj(systemYaml['choices_format'])
     const maxLabel = str(cc['max_label_chars'], '40')
+    const ctx      = compressContext(previousText)
 
     return `${persona}プレイヤーの選択で物語が変化するゲームのシナリオを書いてください。
 
 【これまでの物語】
-${previousText || '（まだ何も起きていない）'}
+${ctx || '（まだ何も起きていない）'}
 
 【直前の選択】${previousChoiceText || '（最初の選択のため選択なし）'}
 
@@ -140,11 +154,12 @@ ${instText}
   const nc       = obj(systemYaml['normal_scene'])
   const minChars = str(nc['min_chars'], '280')
   const maxChars = str(nc['max_chars'], '350')
+  const ctx      = compressContext(previousText)
 
   return `${persona}
 
 【これまでの物語】
-${previousText || '（まだ何も起きていない）'}
+${ctx || '（まだ何も起きていない）'}
 
 【直前の選択】${previousChoiceText || '（選択なし）'}
 
